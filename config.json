@@ -1,0 +1,38 @@
+{
+  "blaize_mod": {
+    "version": "3.2",
+    "name": "BLAIZE MOD Processing System",
+    "description": "Modular processing framework for BLAIZE operations",
+    "modules": [
+      {
+        "name": "DataValidator",
+        "enabled": true,
+        "config": {
+          "validate_schema": true,
+          "strict_mode": false
+        }
+      },
+      {
+        "name": "DataTransformer",
+        "enabled": true,
+        "config": {
+          "transform_type": "default",
+          "output_format": "json"
+        }
+      },
+      {
+        "name": "DataExporter",
+        "enabled": true,
+        "config": {
+          "export_path": "./output",
+          "auto_export": true
+        }
+      }
+    ],
+    "settings": {
+      "log_level": "INFO",
+      "enable_logging": true,
+      "max_log_entries": 1000
+    }
+  }
+}
