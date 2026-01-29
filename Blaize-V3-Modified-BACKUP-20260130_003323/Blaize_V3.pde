@@ -1,0 +1,2439 @@
+// lib32z1 worked for App Export on MacOS //<>//
+
+import java.awt.event.KeyEvent;
+import java.awt.AWTException;
+import processing.net.*;
+import java.net.InetAddress;
+import java.net.DatagramSocket;
+import java.net.DatagramPacket;
+
+Server s;
+Client CC;
+InetAddress inet;
+DatagramSocket udpSocket;  // UDP para recibir datos de MediaPipe
+Thread udpThread;  // Thread para recibir UDP
+
+kreis[] spotlight = new kreis[101];
+rectbutton[] S = new rectbutton[50];
+onoffbutton[] O = new onoffbutton[15];
+slider[] X = new slider[10];
+
+int[] ranX = new int[1001]; 
+int[] ranY = new int[1001];
+ArrayList<PVector> presetPos = new ArrayList<PVector>();
+
+PImage[] pix = new PImage[60];
+
+PrintWriter FileOutput;
+
+PGraphics page1presetPix, page2presetPix, QuadPhaseLED;
+
+color presetColor   = color(0, 0, 255);
+color multiColorclr = color(255);
+
+final long bpmConstant = 238740;         // Constant used for BPM auto mode
+
+final int LMZxpos  = 5;                  // "Line Move Zone"
+final int LMZypos  = 5*85+5;
+final int LMZxsize = 460;
+final int LMZysize = 340;
+
+int presetNumber = 0;                    // 0 - 15
+int presetSpeed      = 30;               // 0 - 100
+int presetSizeDestination = 50;          // easing
+int presetBrightnessDestination = 100;   // easing
+int presetStrobing   = 0;                // 0 - 100
+int a, b, c, d = 0;                      // Counters used for Random Numbers
+int frameSizeX = 970;                    // width of drawin zone only (without (!) command window, 'cmdWindowWidth' pixels wide)
+int frameSizeY = 1000;                   // height of window
+int cmdWindowWidth = 630;                // width of command window
+int shadeAmount = 0;
+int bpm = 128;
+int upperPage = 0;
+int lowerPage = 0;
+int bpmSwitchCounter = -1;
+int fromWiFi_X = 8, fromWiFi_Y = 8;
+
+long strobeTime, time = 0;
+long bpmSTLtime = 0;
+long time2 = 0;
+long lastMouseMovedTime = 0;
+
+float m, v;                   // Counters used for Rotation etc.
+float translateCounter;
+float presetBrightness = 100;  // 0 - 100
+float presetSize       =  50;  // 0 - 100
+
+boolean onoff;
+boolean multiColor = false;
+boolean drawTranslateMode = false;
+boolean rec = false;
+boolean bpmSTLmode = false;
+boolean lockscreen = false;
+boolean flag = false;
+boolean editFramePos = false;
+boolean editFrameSize = false;
+boolean dontShowStartupScreenAnymore = false;
+boolean hideControlWindow = false;
+boolean mediaPipeFollower = false;  // MediaPipe spot follower mode
+boolean isFullscreen = false;
+boolean shouldToggleFullscreen = false;  // Bandera para cambiar fullscreen de forma segura
+int lastClickTime = 0;
+int doubleClickThreshold = 300;  // ms para detectar doble clic
+int cmdWindowWidthOriginal = 630;  // Guardar ancho original del panel
+
+// Variables para control de JFrame fullscreen
+import java.awt.Frame;
+import java.awt.Rectangle;
+import java.awt.GraphicsDevice;
+import java.awt.GraphicsEnvironment;
+import javax.swing.JFrame;
+
+Object mainFrame = null;
+Rectangle normalBounds = null;
+Rectangle screenBounds = null;
+
+String pass = "";
+String realPass = "BBW";
+String PCname;
+String myIP;
+
+// MediaPipe tracking variables
+int mpNoseX = 0, mpNoseY = 0;
+int mpLeftWristX = 0, mpLeftWristY = 0;
+int mpRightWristX = 0, mpRightWristY = 0;
+int mpLeftShoulderX = 0, mpLeftShoulderY = 0;
+int mpRightShoulderX = 0, mpRightShoulderY = 0;
+boolean mediaPipeDataReceived = false;
+int udpPacketsReceived = 0;
+boolean showHandSpots = true;  // Mostrar/ocultar spots de manos
+
+// Galería de logos
+PImage[] logoGallery;
+String[] logoNames;
+int currentLogoIndex = 0;
+int totalLogos = 0;
+int logoSlotToLoad = -1;  // Índice del slot donde cargar la imagen
+boolean rightClickProcessed = false;  // Control para evitar múltiples aperturas de diálogo
+boolean showDebugInfo = true;  // Controla la visibilidad del texto de debug en preset 15
+
+PImage miniImage;
+PImage AeroTraxBall;
+
+void settings() {
+  size(1600, 1000);  // frameSizeX (970) + cmdWindowWidth (630) = 1600
+}
+
+void setup() {
+  surface.setResizable(true);
+  surface.setTitle("Blaize V3 - Presiona F para Fullscreen");
+  
+  // Obtener referencia a JFrame para control de fullscreen
+  try {
+    mainFrame = surface.getNative();
+    if (mainFrame instanceof processing.awt.PSurfaceAWT.SmoothCanvas) {
+      processing.awt.PSurfaceAWT.SmoothCanvas canvas = (processing.awt.PSurfaceAWT.SmoothCanvas) mainFrame;
+      mainFrame = (JFrame) canvas.getFrame();
+    }
+    // Obtener dimensiones de la pantalla
+    GraphicsDevice device = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
+    screenBounds = device.getDefaultConfiguration().getBounds();
+  } catch (Exception e) {
+    println("Error obteniendo JFrame: " + e.getMessage());
+  }
+
+  hint(DISABLE_DEPTH_TEST);      // Ignore Z coordinates (optical glitches, maybe caused by push/popMatrix ?), draw everything on top of each other
+
+  frameRate(60);
+  ellipseMode(CENTER);
+  rectMode(CORNER);
+  textAlign(CENTER, CENTER);
+
+  miniImage = createImage(frameSizeX, height, RGB);
+
+  for (int n=0; n<21; n++) {
+    spotlight[n] = new kreis();
+  }
+
+  try {  
+    s = new Server(this, 12345);
+  }
+  catch(Exception e) {
+  }
+  
+  // Inicializar UDP para MediaPipe
+  try {
+    udpSocket = new DatagramSocket(12346);
+    println("UDP MediaPipe listener iniciado en puerto 12346");
+    
+    // Iniciar thread para recibir datos UDP
+    udpThread = new Thread(new Runnable() {
+      public void run() {
+        receiveUDP();
+      }
+    });
+    udpThread.start();
+  }
+  catch(Exception e) {
+    println("Error iniciando UDP: " + e.getMessage());
+  }
+
+  for (int a=0; a<4; a++) {
+    for (int b=0; b<4; b++) {
+      S[4*b+a] = new rectbutton(color(200), a*155+5, b*85+5, 150, 80, 4*b+a, "PRESET");
+    }
+  }        //upperPage 0
+
+  for (int a=0; a<4; a++) {
+    for (int b=0; b<4; b++) {
+      S[4*b+a+16] = new rectbutton(color(200), a*155+5, b*85+5, 150, 80, 4*b+a+16, "PRESET");
+    }
+  }  //upperPage 1
+
+  pix[0]   = loadImage("Blaize presets -1.png");  //images 150x80
+  pix[1]   = loadImage("Blaize presets -2.png");
+  pix[2]   = loadImage("Blaize presets -3.png");
+  pix[3]   = loadImage("Blaize presets -4.png");
+  pix[4]   = loadImage("Blaize presets -5.png");
+  pix[5]   = loadImage("Blaize presets -6.png");
+  pix[6]   = loadImage("Blaize presets -7.png");
+  pix[7]   = loadImage("Blaize presets -8.png");
+  pix[8]   = loadImage("Blaize presets -9.png");
+  pix[9]   = loadImage("Blaize presets -10.png");
+  pix[10]  = loadImage("Blaize presets -11.png");
+  pix[11]  = loadImage("Blaize presets -12.png");
+  pix[12]  = loadImage("Blaize presets -13.png");
+  pix[13]  = loadImage("Blaize presets -14.png");
+  pix[14]  = loadImage("Blaize presets -15.png");
+  pix[15]  = loadImage("Blaize presets -17.png");
+  pix[16]  = loadImage("Blaize presets -18.png");
+  pix[17]  = loadImage("Blaize presets -19.png");
+  pix[18]  = loadImage("Blaize presets -20.png");
+  pix[19]  = loadImage("Blaize presets -21.png");
+  pix[20]  = loadImage("Blaize presets -23.png");
+  pix[21]  = loadImage("Blaize presets -24.png");
+  pix[22]  = loadImage("Blaize presets -25.png");
+  pix[23]  = loadImage("Blaize presets -26.png");
+  pix[24]  = loadImage("Blaize presets -27.png");
+  pix[25]  = loadImage("Blaize presets -28.png");
+  pix[26]  = loadImage("Blaize presets -30.png");
+  pix[27]  = loadImage("Blaize presets -32.png");
+  pix[28]  = loadImage("Blaize presets -35.png");
+  pix[29]  = loadImage("Blaize presets -36.png");
+  pix[30]  = loadImage("Blaize presets -15.png");
+  pix[31]  = loadImage("Blaize presets -15.png");
+  AeroTraxBall = loadImage("AeroTrax Sphere Logo.png");
+  
+  // Cargar galería de logos
+  loadLogoGallery();
+
+
+  //Fusion of 16 small images to one large in a separate canvas, which is later "pasted" as an image with image(page1presetPix, x, y)
+  page1presetPix = createGraphics(cmdWindowWidth, frameSizeY);
+  page1presetPix.beginDraw();
+
+  for (int a=0; a<4; a++) {
+    for (int b=0; b<4; b++) {
+      page1presetPix.image(pix[4*b+a], a*155+5, b*85+5, 150, 80);
+    }
+  }
+
+  page1presetPix.endDraw();
+
+
+  page2presetPix = createGraphics(cmdWindowWidth, frameSizeY);
+  page2presetPix.beginDraw();
+
+  for (int a=0; a<4; a++) {
+    for (int b=0; b<4; b++) {
+      page2presetPix.image(pix[4*b+a+16], a*155+5, b*85+5, 150, 80);
+    }
+  }
+
+  page2presetPix.endDraw();
+
+  //QuadPhaseLED = createGraphics(20, 20);
+
+
+  S[32] = new rectbutton(color(255, 0, 0), 0*(cmdWindowWidth-10)/8+5, 4*85+5, (cmdWindowWidth)/8, 80, 0, "COLOR");    // Red
+  S[33] = new rectbutton(color(255, 255, 0), 1*(cmdWindowWidth-10)/8+5, 4*85+5, (cmdWindowWidth)/8, 80, 0, "COLOR");    // Yellow
+  S[34] = new rectbutton(color(  0, 255, 0), 2*(cmdWindowWidth-10)/8+5, 4*85+5, (cmdWindowWidth)/8, 80, 0, "COLOR");    // Green
+  S[35] = new rectbutton(color(  0, 255, 255), 3*(cmdWindowWidth-10)/8+5, 4*85+5, (cmdWindowWidth)/8, 80, 0, "COLOR");    // Türkis
+  S[36] = new rectbutton(color(  0, 0, 255), 4*(cmdWindowWidth-10)/8+5, 4*85+5, (cmdWindowWidth)/8, 80, 0, "COLOR");    // Blue
+  S[37] = new rectbutton(color(255, 0, 255), 5*(cmdWindowWidth-10)/8+5, 4*85+5, (cmdWindowWidth)/8, 80, 0, "COLOR");    // Violet
+  S[38] = new rectbutton(color(255, 255, 255), 6*(cmdWindowWidth-10)/8+5, 4*85+5, (cmdWindowWidth)/8, 80, 0, "COLOR");    // White
+  S[39] = new rectbutton(color(          120), 7*(cmdWindowWidth-10)/8+5, 4*85+5, (cmdWindowWidth)/8, 80, 1, "COLOR");    // Random
+
+  X[0] = new slider(color(30), color(80), 0*155+5, 5*85+5, 460, 80, "Speed");
+  X[1] = new slider(color(30), color(80), 0*155+5, 6*85+5, 460, 80, "Size");
+  X[2] = new slider(color(30), color(80), 0*155+5, 7*85+5, 460, 80, "Brightness");
+  X[3] = new slider(color(30), color(80), 0*155+5, 8*85+5, 460, 80, "Strobing");
+  //X[4] = new slider(color(30),color(80),0*155+5,6*85+5,460,80,"Threshold");
+  //X[5] = new slider(color(30),color(80),0*155+5,7*85+5,460,80,"Dynamic");
+  X[6] = new slider(color(30), color(80), 0*155+5, 6*85+5, 460, 80, "Shading");
+
+  X[0].value = 30;   
+  X[1].value = 50;   
+  X[2].value = 100;   
+  X[3].value = 0;   
+  X[6].value = 0; 
+
+  O[0] = new onoffbutton(color(255, 0, 0), 0*155+5, 4*85+5, 150, 80, 0, "Multicolor");
+  O[1] = new onoffbutton(color(255, 0, 0), 0*155+5, 5*85+5, 150, 80, 0, "Blackout");
+  O[2] = new onoffbutton(color(255, 0, 0), 1*155+5, 4*85+5, 150, 80, 0, "BPM");
+  O[3] = new onoffbutton(color(255, 0, 0), 2*155+5, 4*85+5, 150, 38, 0, "+");
+  O[4] = new onoffbutton(color(255, 0, 0), 2*155+5, 4*85+47, 150, 38, 0, "-");
+  O[5] = new onoffbutton(color(255, 0, 0), 0*155+5, 4*85+5, 150, 80, 0, "Line Move");
+  O[6] = new onoffbutton(color(255, 0, 0), 2*155+5, 5*85+5, 150, 80, 0, "Nudge +");
+  O[7] = new onoffbutton(color(255, 0, 0), 1*155+5, 5*85+5, 150, 80, 0, "Nudge -");
+  O[8] = new onoffbutton(color(255, 0, 0), 3*155+5, 5*85+5, 150, 80, 0, "Hand Spots");
+} 
+
+
+
+
+
+
+
+
+
+
+
+
+void draw() {
+  // Actualizar tamaño dinámicamente
+  if (!isFullscreen) {
+    frameSizeX = width - cmdWindowWidth;
+    frameSizeY = height;
+  }
+  
+  // Verificar si se debe cambiar fullscreen (hacerlo al inicio de draw para evitar congelamiento)
+  if (shouldToggleFullscreen) {
+    shouldToggleFullscreen = false;
+    toggleFullscreen();
+  }
+  
+  fill(0, map((mousePressed && !lockscreen && mouseX<frameSizeX ? 100 : shadeAmount), 0, 100, 255, 10)); 
+  noStroke();
+  rect(0, 0, frameSizeX, height);        // background of Beamer without (!) command window
+
+
+  pushMatrix();
+
+  if (mousePressed && !lockscreen) {
+    noStroke(); 
+    fill(255);
+    if (mouseX < frameSizeX) {
+      for (int i=0; i<10; i++) {
+        ellipse(mouseX-i*(mouseX-pmouseX)/10, mouseY-i*(mouseY-pmouseY)/10, height/10, height/10);
+      }
+    }
+  }
+
+
+  //easing
+  if (!O[1].buttonState) {      // if no Blackout
+    presetBrightness += 0.2*(presetBrightnessDestination-presetBrightness);
+  }
+
+  presetSize += 0.14*(presetSizeDestination-presetSize);
+
+
+  fill  (presetColor, presetBrightness*255/100);
+  stroke(presetColor, presetBrightness*255/100);
+
+
+  //Line moving
+  if (drawTranslateMode  &&  presetPos.size() >= 3) {
+    translateCounter += 1.0;
+    if (translateCounter >= presetPos.size()) {  
+      translateCounter = 0;
+    }
+    translate(map(presetPos.get(int(translateCounter)).x, LMZxpos+frameSizeX, LMZxpos+frameSizeX+LMZxsize, -frameSizeX, frameSizeX), map(presetPos.get(int(translateCounter)).y, LMZypos, LMZypos+LMZysize, -height, height));
+  }
+
+  //translate(map(fromWiFi_X, 0, 16, -frameSizeX/3, frameSizeX/3), map(fromWiFi_Y, 0, 16, -height/3, height/3));  //Coordinates from Smartphone
+
+
+  //BPM Sound-To-Light
+  if (bpmSTLmode) {
+    if (millis()-bpmSTLtime >= bpmConstant/bpm) {
+      bpmSwitchCounter++;
+      bpmSTLtime = millis();
+
+      int t = int(random(10, 95));     // No easing, instant size change
+      X[1].value = t;
+      presetSize = t;
+      presetSizeDestination = t;
+
+      do {  
+        presetColor = color(random(0, 255), random(0, 255), random(0, 255));
+      } while (brightness(presetColor) < 120);
+
+      if (bpmSwitchCounter >= 8) {
+        bpmSwitchCounter = 0;
+        do {
+          presetNumber = (int) random(0, 31);
+          if (presetNumber == 8) {        // Mini-Dots-Discoball neu initialisieren
+            for (int x=0; x<1000; x++) {
+              ranX[x] = int(random(-0.71*frameSizeX, 0.71*frameSizeX));
+              ranY[x] = int(random(-0.71*frameSizeX, 0.71*frameSizeX));
+            }
+          }
+        } while (presetNumber==15 || presetNumber==23);
+      }
+    }
+  }
+
+  if (millis()-strobeTime >= 200-1.8*presetStrobing) {  
+    onoff = !onoff; 
+    strobeTime = millis();
+  }
+  if (presetStrobing == 0) {  
+    onoff = true;
+  }
+
+  if (onoff) {
+    switch(presetNumber) {
+      /* 1 Kreis-Ring (Sinus) */
+    case 0:  
+      noStroke();
+      for (float i=0; i<18; i++) {
+        if (multiColor  && i%2 == 0) {  
+          fill(presetColor, presetBrightness*255/100);
+        } else if (multiColor) {  
+          fill(multiColorclr, presetBrightness*255/100);
+        }
+        ellipse(frameSizeX/2+((0.9*presetSize+10)*height/240)*sin(i*v), height/2+((0.9*presetSize+10)*height/240)*cos(i*v), 0.8*(0.9*presetSize+10), 0.8*(0.9*presetSize+10));  
+        v += float(presetSpeed)/360000;
+      }
+      break;
+      /* 1 Kreis-Ring (Konstant) */
+    case 1:  
+      noStroke();
+      translate(frameSizeX/2, height/2);
+      rotate(v); 
+      v += float(presetSpeed)/2000;
+      for (float i=0; i<18; i++) {
+        if (multiColor  && i%2 == 0) {  
+          fill(presetColor, presetBrightness*255/100);
+        } else if (multiColor) {  
+          fill(multiColorclr, presetBrightness*255/100);
+        }
+        ellipse(((0.9*presetSize+10)*height/240)*sin(i*PI/9), ((0.9*presetSize+10)*height/240)*cos(i*PI/9), 0.8*(0.9*presetSize+10), 0.8*(0.9*presetSize+10));
+      }
+      break;
+      /* 3 Kreis-Ringe */
+    case 2:  
+      noStroke();
+      translate(frameSizeX/2, height/2);
+      rotate(v); 
+      v += float(presetSpeed)/3000;
+      for (float i=0; i<18; i++) {
+        if (multiColor  && i%2 == 0) {  
+          fill(presetColor, presetBrightness*255/100);
+        } else if (multiColor) {  
+          fill(multiColorclr, presetBrightness*255/100);
+        }
+        ellipse(((0.9*presetSize+10)*height/240)*sin(i*PI/9), ((0.9*presetSize+10)*height/240)*cos(i*PI/9), 0.4*(0.9*presetSize+10), 0.4*(0.9*presetSize+10));
+      }
+      for (float i=0; i<18; i++) {
+        if (multiColor  && i%2 == 0) {  
+          fill(presetColor, presetBrightness*255/100);
+        } else if (multiColor) {  
+          fill(multiColorclr, presetBrightness*255/100);
+        }
+        ellipse(((0.9*presetSize+10)*height/800)*sin(i*PI/9), ((0.9*presetSize+10)*height/800)*cos(i*PI/9), 0.1*(0.9*presetSize+10), 0.1*(0.9*presetSize+10));
+      }
+      rotate(-2*v);
+      for (float i=0; i<18; i++) {
+        if (multiColor  && i%2 == 0) {  
+          fill(presetColor, presetBrightness*255/100);
+        } else if (multiColor) {  
+          fill(multiColorclr, presetBrightness*255/100);
+        }
+        ellipse(((0.9*presetSize+10)*height/400)*sin(i*PI/9), ((0.9*presetSize+10)*height/400)*cos(i*PI/9), 0.2*(0.9*presetSize+10), 0.2*(0.9*presetSize+10));
+      }                 
+      break;
+      /* Random Linien */
+    case 3:  
+      strokeWeight(1.4*presetSize+10);
+      if (multiColor) {
+        line(a, b, a+((c-a)/3), b+((d-b)/3));
+        line(a+(2*(c-a)/3), b+(2*(d-b)/3), c, d);
+        stroke(multiColorclr, presetBrightness*255/100);
+        line(a+((c-a)/3), b+((d-b)/3), a+(2*(c-a))/3, b+(2*(d-b)/3));
+      } else {
+        line(a, b, c, d);
+      }
+      if (millis()-time >= 1000-10*presetSpeed  &&  presetSpeed != 0) {
+        time = millis();
+        a = int(random(50, frameSizeX-50));
+        b = int(random(50, height-50));
+        c = int(random(50, frameSizeX-50));
+        d = int(random(50, height-50));
+      }
+      break;
+      /* Random Ringe groß & schmal */
+    case 4:  
+      noFill();
+      strokeWeight(map(presetSize, 0, 100, 5, 60));
+      if (multiColor) {
+        for (float l=0; l<=7; l++) {
+          if (l%2 == 0) {  
+            stroke(presetColor, presetBrightness*255/100);
+          } else {  
+            stroke(multiColorclr, presetBrightness*255/100);
+          }
+          arc(a, b, 500, 500, l*PI/4+c, (l+1)*PI/4+c, OPEN);
+        }
+      } else {
+        ellipse(a, b, 500, 500);
+      }
+      if (millis()-time >= 1000-10*presetSpeed  &&  presetSpeed != 0) {
+        time = millis();
+        a = int(random(150, frameSizeX-150));
+        b = int(random(150, height-150));
+      }
+      break;
+      /* Sinus */
+    case 5:  
+      noStroke();
+      for (float f=0; f<frameSizeX/16; f++) {
+        if (multiColor) {
+          if (f%20 <= 10) {  
+            fill(presetColor, presetBrightness*255/100);
+          } else {  
+            fill(multiColorclr, presetBrightness*255/100);
+          }
+        }
+        ellipse(16*f, height/2+ 4.5*presetSize*sin(v - f/15 /*NumOfPeriods*/), 70, 70);  
+        v += float(presetSpeed)/90000;
+      }
+      break;
+      /* Sinus-Blöcke */
+    case 6:  
+      noStroke();
+      for (float f=0; f<frameSizeX/90; f++) {
+        if (multiColor) {
+          if (f%2 == 0) {  
+            fill(presetColor, presetBrightness*255/100);
+          } else {  
+            fill(multiColorclr, presetBrightness*255/100);
+          }
+        }
+        rect(100*f, 0.45*height+100*sin(v - f/1)+presetSize*height*0.005, 60, height/10);
+        rect(100*f, 0.45*height-100*sin(v - f/1)-presetSize*height*0.005, 60, height/10);  
+        v += float(presetSpeed)/15000;
+      }
+      break;
+      /* Dreh-Kreuz */
+    case 7:  
+      strokeWeight(1.5*presetSize);
+      translate(frameSizeX/2, height/2);
+      rotate(v); 
+      v += float(presetSpeed)/1000;
+      if (multiColor) {
+        for (float i=0; i<10; i++) {
+          if (multiColor  && i%2 == 0) {  
+            stroke(presetColor, presetBrightness*255/100);
+          } else if (multiColor) {  
+            stroke(multiColorclr, presetBrightness*255/100);
+          }
+          line(0, (i-5)*height/5, 0, (i-4)*height/5);  
+          line((i-5)*frameSizeX/5, 0, (i-4)*frameSizeX/5, 0);
+        }
+      } else {
+        line(0, -height, 0, height);
+        line(-frameSizeX, 0, frameSizeX, 0);
+      }
+      break; 
+      /* Mini-dots-discoball */
+    case 8:  
+      noStroke();
+      translate(frameSizeX/2, height/2);
+      rotate(v);  
+      v += float(presetSpeed)/5000;
+      for (int x=0; x<1000; x++) {
+        if (multiColor && x>500) {  
+          fill(multiColorclr, presetBrightness*255/100);
+        }
+        ellipse(ranX[x], ranY[x], presetSize/8, presetSize/8);
+      }
+      break;
+      /* Random Kreise */
+    case 9:  
+      noStroke();
+      for (int x=0; x<(presetSize+10)/10; x++) {
+        if (multiColor && x>presetSize/20) {  
+          fill(multiColorclr, presetBrightness*255/100);
+        }
+        ellipse(ranX[x], ranY[x], 300-2.7*presetSize, 300-2.7*presetSize);
+      }
+      if (millis()-time >= 1000-9.5*presetSpeed  &&  presetSpeed != 0) {
+        time = millis();
+        for (int x=0; x<(presetSize+10)/10; x++) {
+          ranX[x] = int(random((300-2.7*presetSize)/2, frameSizeX-(300-2.7*presetSize)/2));
+          ranY[x] = int(random((300-2.7*presetSize)/2, height    -(300-2.7*presetSize)/2));
+        }
+      }
+      break;
+      /* Random Ringe */
+    case 10: 
+      noFill();
+      strokeWeight(60-0.5*presetSize);
+      for (int x=0; x<(presetSize+10)/10; x++) {
+        if (multiColor && x>presetSize/20) {  
+          stroke(multiColorclr, presetBrightness*255/100);
+        }
+        ellipse(ranX[x], ranY[x], 500-4*presetSize, 500-4*presetSize);
+      }
+      if (millis()-time >= 1000-9.5*presetSpeed  &&  presetSpeed != 0) {
+        time = millis();
+        for (int x=0; x<(presetSize+10)/10; x++) {
+          ranX[x] = int(random((300-2.7*presetSize)/2, frameSizeX-(300-2.7*presetSize)/2));
+          ranY[x] = int(random((300-2.7*presetSize)/2, height    -(300-2.7*presetSize)/2));
+        }
+      }
+      break;
+      /* Scanner seitlich */
+    case 11: 
+      strokeWeight(1.5*presetSize);
+      translate((frameSizeX/2.4)*sin(v)+frameSizeX/2, 0); 
+      v += float(presetSpeed)/1000;
+      if (multiColor) {
+        line(0, 0, 0, height/3);
+        line(0, 2*height/3, 0, height);
+        stroke(multiColorclr, presetBrightness*255/100);
+        line(0, height/3, 0, 2*height/3);
+      } else {
+        line(0, 0, 0, height);
+      }
+      break;
+      /* Scanner hoch/runter */
+    case 12: 
+      strokeWeight(1.5*presetSize);
+      translate(0, (height/2.4)*sin(v)+height/2); 
+      v += float(presetSpeed)/1000;
+      if (multiColor) {
+        line(0, 0, frameSizeX/3, 0);
+        line(2*frameSizeX/3, 0, frameSizeX, 0);
+        stroke(multiColorclr, presetBrightness*255/100);
+        line(frameSizeX/3, 0, 2*frameSizeX/3, 0);
+      } else {
+        line(0, 0, frameSizeX, 0);
+      }
+      break;
+      /* 2 Scanner */
+    case 13: 
+      strokeWeight(1.5*presetSize);
+      translate((frameSizeX/2.4)*sin(v*1.2)+frameSizeX/2, (height/2.4)*sin(v*0.8)+height/2); 
+      v += float(presetSpeed)/1000;
+      if (multiColor) {
+        for (float i=0; i<10; i++) {
+          if (multiColor  && i%2 == 0) {  
+            stroke(presetColor, presetBrightness*255/100);
+          } else if (multiColor) {  
+            stroke(multiColorclr, presetBrightness*255/100);
+          }
+          line(0, (i-5)*height/5, 0, (i-4)*height/5);  
+          line((i-5)*frameSizeX/5, 0, (i-4)*frameSizeX/5, 0);
+        }
+      } else {
+        line(0, -height, 0, height);
+        line(-frameSizeX, 0, frameSizeX, 0);
+      }
+      break;
+      /* PingPong-Kreise */
+    case 14: 
+      noStroke();
+      for (int m=0; m<(presetSize+4)/5; m++) {
+        if (multiColor && m>(presetSize+4)/10) {  
+          fill(multiColorclr, presetBrightness*255/100);
+        }
+        spotlight[m].move();
+      }
+      break;
+      /* Maus-Verfolger-Spot / MediaPipe Follower */
+    case 15: 
+      noStroke();
+      
+      // Obtener logo actual de la galería
+      PImage currentLogo = getCurrentLogo();
+      
+      if (mediaPipeDataReceived) {
+        // MODO MEDIAPIPE: Logo sigue la nariz
+        image(currentLogo, mpNoseX - 3*presetSize, mpNoseY - 3*presetSize, 6*presetSize, 6*presetSize);
+        
+        // Spots en puntos de tracking
+        float spotSize = map(presetSize, 0, 100, 20, 100);
+        float brightness = presetBrightness * 255 / 100;
+        
+        // Muñecas (solo si showHandSpots está activado)
+        if (showHandSpots) {
+          fill(multiColor ? multiColorclr : presetColor, brightness);
+          ellipse(mpLeftWristX, mpLeftWristY, spotSize * 0.6, spotSize * 0.6);
+          ellipse(mpRightWristX, mpRightWristY, spotSize * 0.6, spotSize * 0.6);
+        }
+        
+        // Info debug (controlado por Alt+D)
+        if (showDebugInfo) {
+          fill(0, 255, 0);
+          textSize(14);
+          textAlign(LEFT, TOP);
+          text("MediaPipe: ON | Logo: " + logoNames[currentLogoIndex], 10, 10);
+        }
+      } else {
+        // MODO RATÓN: Logo sigue el mouse
+        image(currentLogo, (drawTranslateMode ? frameSizeX/2 : mouseX)-3*presetSize, (drawTranslateMode ? height/2 : mouseY)-3*presetSize, 6*presetSize, 6*presetSize);
+        
+        // MENSAJES DE DEBUG (controlados por Alt+D)
+        if (showDebugInfo) {
+          // MENSAJE GRANDE PARA DEBUG
+          fill(255, 0, 0);
+          textSize(32);
+          textAlign(CENTER, CENTER);
+          text("⚠ MEDIAPIPE NO CONECTADO", frameSizeX/2, height/2 - 100);
+          
+          textSize(20);
+          fill(255, 255, 0);
+          text("1. Abre el tracker desde el botón", frameSizeX/2, height/2 - 50);
+          text("2. Selecciona tu cámara", frameSizeX/2, height/2 - 20);
+          text("3. Click en INICIAR", frameSizeX/2, height/2 + 10);
+          text("4. Ponte frente a la cámara", frameSizeX/2, height/2 + 40);
+          
+          // Info de estado
+          fill(200, 200, 200);
+          textSize(16);
+          textAlign(CENTER, TOP);
+          text("Logo: " + logoNames[currentLogoIndex], frameSizeX/2, 10);
+          textSize(12);
+          text("[1] Anterior | [2] Siguiente", frameSizeX/2, 35);
+          
+          // Contador UDP
+          textSize(14);
+          if (udpPacketsReceived > 0) {
+            fill(255, 150, 0);
+            text("Paquetes UDP recibidos: " + udpPacketsReceived, frameSizeX/2, 70);
+            text("Pero sin pose detectada - verifica el tracker", frameSizeX/2, 90);
+          } else {
+            fill(255, 100, 100);
+            text("No se han recibido paquetes UDP", frameSizeX/2, 70);
+            text("Puerto: 12346 | Estado: Esperando...", frameSizeX/2, 90);
+          }
+        }
+      }
+      break;
+      /* Multiscanner seitlich */
+    case 16: 
+      strokeWeight(presetSize);
+      for (int r=-4; r<=4; r++) {
+        if (multiColor) {
+          if (r%2 == 0) {  
+            stroke(presetColor, presetBrightness*255/100);
+          } else {  
+            stroke(multiColorclr, presetBrightness*255/100);
+          }
+        }
+        line(m+r*frameSizeX/4, 0, m+r*frameSizeX/4, height);
+      }
+      m = m + float(presetSpeed)/3;
+      if (m >= frameSizeX-50) {  
+        m = -50;
+      }
+      break;
+      /* Multiscanner runter */
+    case 17: 
+      strokeWeight(presetSize);
+      for (int r=-4; r<=4; r++) {
+        if (multiColor) {
+          if (r%2 == 0) {  
+            stroke(presetColor, presetBrightness*255/100);
+          } else {  
+            stroke(multiColorclr, presetBrightness*255/100);
+          }
+        }
+        line(0, m+r*height/4, frameSizeX, m+r*height/4);
+      }
+      m = m + float(presetSpeed)/3;
+      if (m >= height-50) {  
+        m = -50;
+      }
+      break;
+      /* Sinus-Mini-Multiscanner seitlich */
+    case 18: 
+      strokeWeight(80);
+      translate(0, (height/3)*sin(v)); 
+      v += float(presetSpeed)/5000;
+      for (int r=-4; r<=4; r++) {
+        if (multiColor) {
+          if (r%2 == 0) {  
+            stroke(presetColor, presetBrightness*255/100);
+          } else {  
+            stroke(multiColorclr, presetBrightness*255/100);
+          }
+        }
+        line(m+r*frameSizeX/4, map(presetSize, 0, 100, height/2, 200), m+r*frameSizeX/4, map(presetSize, 0, 100, height/2, height-200));
+      }
+      m = m + float(presetSpeed)/4;
+      if (m >= frameSizeX-50) {  
+        m = -50;
+      }
+      break;
+      /* Sinus-Mini-Multiscanner runter */
+    case 19: 
+      strokeWeight(80);
+      translate((frameSizeX/3)*sin(v), 0); 
+      v += float(presetSpeed)/5000;
+      for (int r=-4; r<=4; r++) {
+        if (multiColor) {
+          if (r%2 == 0) {  
+            stroke(presetColor, presetBrightness*255/100);
+          } else {  
+            stroke(multiColorclr, presetBrightness*255/100);
+          }
+        }
+        line(map(presetSize, 0, 100, frameSizeX/2, 200), m+r*height/4, map(presetSize, 0, 100, frameSizeX/2, frameSizeX-200), m+r*height/4);
+      }
+      m = m + float(presetSpeed)/4;
+      if (m >= height-50) {  
+        m = -50;
+      }
+      break;
+      /* Halbkreise */
+    case 20: 
+      noFill(); 
+      strokeWeight(presetSize);
+      if (multiColor && a<14) {  
+        stroke(multiColorclr, presetBrightness*255/100);
+      }
+      if     (a<=10 &&  b<=10) {  
+        arc(frameSizeX, height/2, c, c, v*PI/50-HALF_PI, v*PI/50+HALF_PI, OPEN);
+      } else if (a<=10 &&  b> 10) {  
+        arc(frameSizeX/2, height, c, c, v*PI/50, v*PI/50+PI, OPEN);
+      } else if (a> 10 &&  b<=10) {  
+        arc(0, height/2, c, c, v*PI/50+HALF_PI, v*PI/50+3*HALF_PI, OPEN);
+      } else if (a> 10 &&  b> 10) {  
+        arc(frameSizeX/2, 0, c, c, v*PI/50-PI, v*PI/50, OPEN);
+      }
+      v = v + float(presetSpeed)/20;  
+      if (v >= 100) {
+        v = 0;
+        a = int(random(0, 21));
+        b = int(random(0, 21));
+        c = int(random(350, height-50));
+      }
+      break;      
+      /* Sinus mit Strahlen */
+    case 21: 
+      noStroke();
+      for (float f=0; f<frameSizeX/16; f++) {
+        if (f%14 < 1) {
+          fill(multiColorclr, 255);
+        } else {
+          fill(presetColor, presetBrightness*255/200);
+        }
+        ellipse(16*f, height/2+4.5*presetSize*sin(v - f/15 /*NumOfPeriods*/), 80, 80); 
+        v += float(presetSpeed)/90000;
+      }
+      break;
+      /* Rotierende Lines */
+    case 22: 
+      strokeWeight(50+0.5*presetSize);
+      translate(frameSizeX/2, height/2);
+      rotate(v); 
+      v += float(presetSpeed)/3000;
+      for (int r=-8; r<=8; r++) {
+        if (multiColor) {
+          if (r%2 == 0) {  
+            stroke(presetColor, presetBrightness*255/100);
+          } else {  
+            stroke(multiColorclr, presetBrightness*255/100);
+          }
+        }
+        line(m+r*frameSizeX/8-frameSizeX/2, -presetSize*height/200+30, m+(r+1)*frameSizeX/8-frameSizeX/2, -presetSize*height/200+30);
+      }
+      rotate(-2*v);
+      for (int r=-8; r<=8; r++) {
+        if (multiColor) {
+          if (r%2 == 0) {  
+            stroke(presetColor, presetBrightness*255/100);
+          } else {  
+            stroke(multiColorclr, presetBrightness*255/100);
+          }
+        }
+        line(m+r*frameSizeX/8-frameSizeX/2, presetSize*height/200-30, m+(r+1)*frameSizeX/8-frameSizeX/2, presetSize*height/200-30);
+      }
+      m += 1;
+      if (m >= frameSizeX-50) {  
+        m = -50;
+      }
+      break;
+      /* Fullscreen-Farbe */
+    case 23: 
+      noStroke();
+      rect(0, 0, frameSizeX, height);
+      break;
+      /* 4 Scanner-Linien */
+    case 24: 
+      strokeWeight(0.8*presetSize);
+      line(frameSizeX/4+(presetSize*height/240)*sin(500*v), height/4-(presetSize*height/240)*cos(500*v), frameSizeX/4-(presetSize*height/240)*sin(500*v), height/4-(presetSize*height/240)*cos(500*v));
+      line(3*frameSizeX/4+(presetSize*height/240)*sin(500*v), 3*height/4-(presetSize*height/240)*cos(500*v), 3*frameSizeX/4-(presetSize*height/240)*sin(500*v), 3*height/4-(presetSize*height/240)*cos(500*v));
+      if (multiColor) {  
+        stroke(multiColorclr, presetBrightness*255/100);
+      }
+      line(3*frameSizeX/4-(presetSize*height/240)*sin(500*v), height/4+(presetSize*height/240)*cos(500*v), 3*frameSizeX/4-(presetSize*height/240)*sin(500*v), height/4-(presetSize*height/240)*cos(500*v));
+      line(frameSizeX/4-(presetSize*height/240)*sin(500*v), 3*height/4+(presetSize*height/240)*cos(500*v), frameSizeX/4-(presetSize*height/240)*sin(500*v), 3*height/4-(presetSize*height/240)*cos(500*v));
+      v += float(presetSpeed)/360000;
+      break;
+      /* 4 rotierende Linien */
+    case 25: 
+      strokeWeight(0.8*presetSize);
+      line(frameSizeX/4+(presetSize*height/240)*sin(500*v), height/4+(presetSize*height/240)*cos(500*v), frameSizeX/4-(presetSize*height/240)*sin(500*v), height/4-(presetSize*height/240)*cos(500*v));
+      line(3*frameSizeX/4+(presetSize*height/240)*sin(500*v), 3*height/4+(presetSize*height/240)*cos(500*v), 3*frameSizeX/4-(presetSize*height/240)*sin(500*v), 3*height/4-(presetSize*height/240)*cos(500*v));
+      if (multiColor) {  
+        stroke(multiColorclr, presetBrightness*255/100);
+      }
+      line(3*frameSizeX/4+(presetSize*height/240)*cos(500*v), height/4+(presetSize*height/240)*sin(500*v), 3*frameSizeX/4-(presetSize*height/240)*cos(500*v), height/4-(presetSize*height/240)*sin(500*v));
+      line(frameSizeX/4+(presetSize*height/240)*cos(500*v), 3*height/4+(presetSize*height/240)*sin(500*v), frameSizeX/4-(presetSize*height/240)*cos(500*v), 3*height/4-(presetSize*height/240)*sin(500*v));
+      v += float(presetSpeed)/360000;
+      break;
+      /* 4 rotierende Kreis-Ringe */
+    case 26: 
+      noStroke();
+      for (int r=0; r<=3; r++) {
+        pushMatrix();
+        switch(r) {
+        case 0:  
+          translate(frameSizeX/4, height/4);   
+          rotate(v);   
+          break;
+        case 1:  
+          translate(3*frameSizeX/4, height/4);   
+          rotate(-v);  
+          break;
+        case 2:  
+          translate(frameSizeX/4, 3*height/4); 
+          rotate(-v);  
+          break;
+        case 3:  
+          translate(3*frameSizeX/4, 3*height/4); 
+          rotate(v);   
+          break;
+        }
+        for (float i=0; i<18; i++) {
+          if (multiColor  && i%2 == 0) {  
+            fill(presetColor, presetBrightness*255/100);
+          } else if (multiColor) {  
+            fill(multiColorclr, presetBrightness*255/100);
+          }
+          ellipse(((presetSize*0.6+3)*height/120)*sin(i*PI/9), ((presetSize*0.6+3)*height/120)*cos(i*PI/9), 0.5*presetSize+6, 0.5*presetSize+6);
+        }
+        popMatrix();
+      }
+      v += float(presetSpeed)/4000;
+      break;
+      /* 4 crazy Kreis-Ringe */
+    case 27: 
+      noStroke();
+      for (int xx=0; xx<=1; xx++) {
+        for (int yy=0; yy<=1; yy++) {
+          rotate(v); 
+          v += float(presetSpeed)/20000;
+          for (float i=0; i<18; i++) {
+            if (multiColor  && i%2 == 0) {  
+              fill(presetColor, presetBrightness*255/100);
+            } else if (multiColor) {  
+              fill(multiColorclr, presetBrightness*255/100);
+            }
+            ellipse((2*xx+1)*(frameSizeX/4)+((presetSize+40)*height/240)*sin(i*PI/9), (2*yy+1)*(height/4)+((presetSize+40)*height/240)*cos(i*PI/9), 0.3*(presetSize+40), 0.3*(presetSize+40));
+          }
+        }
+      }
+      break;
+      /* Kreisring-spot-scan-Dings */
+    case 28: 
+      noStroke();
+      translate(frameSizeX/2, height/2);
+      ellipse(-presetSize*((frameSizeX-45)/250)*cos(v), presetSize*((height-45)/250)*sin(v), 45, 45);
+      if (multiColor) {  
+        fill(multiColorclr, presetBrightness*255/100);
+      }
+      ellipse( presetSize*((frameSizeX-60)/190)*cos(v), presetSize*((height-60)/190)*sin(v), 60, 60);
+      v += float(presetSpeed)/800;
+      break;
+      /* Tunnelrechteck */
+    case 29: 
+      noFill();
+      translate(frameSizeX/2, height/2);
+
+      if (m >= 110) {
+        strokeWeight(max(0, (presetSize+1)*(220-m)/110));  
+        stroke(multiColorclr, presetBrightness*255/100);
+        rect(-(220-m)*frameSizeX/200, -(220-m)*height/200, max(0, (220-m)*frameSizeX/100), max(0, (220-m)*height/100));
+      } else {
+        strokeWeight((presetSize+1)*m/110);
+        rect(-m*frameSizeX/200, -m*height/200, m*frameSizeX/100, m*height/100);
+      }
+
+      m += float(presetSpeed)/40;
+      if (m >= 220) {  
+        m = 0;
+      }
+      break;
+      /* Dot-Scanner */
+    case 30: 
+      noStroke();
+      for (int i=0; i<=9; i++) {
+        for (int j=0; j<=9; j++) {
+          if (multiColor) {
+            if ((i+j)%2 == 0) {  
+              fill(presetColor, constrain(-100+355*sin(v+31*float(i+j)), 0, presetBrightness*255/100));
+            } else {              
+              fill(multiColorclr, constrain(-100+355*sin(v+31*float(i+j)), 0, presetBrightness*255/100));
+            }
+          } else {
+            fill(presetColor, constrain(-100+355*sin(v+31*float(i+j)), 0, presetBrightness*255/100));
+          }
+
+          ellipse(i*frameSizeX/10 + frameSizeX/30, j*frameSizeX/10 + frameSizeX/30, map(presetSize, 0, 100, 10, frameSizeX/18), map(presetSize, 0, 100, 10, frameSizeX/18));
+        }
+      }
+      v += float(presetSpeed)/1200;
+      break;
+
+    case 31:
+      int LEN = 5*height/40;
+      rectMode(CORNERS);
+      noStroke();
+      for (int b=0; b<=2; b++) {
+        float BRIGHT = presetBrightness;      // BRIGHT and presetBrightness = [0, 100]
+        final float THRESH = 0.2;           // Controls flash style of the 3 circles
+        final float BLINKSPD = 3.0;
+        pushMatrix();
+        switch(b) {
+        case 0: 
+          translate(14*frameSizeX/40, 4*height/12);
+          rotate(v);
+          if (sin(BLINKSPD*v) > THRESH) {
+            BRIGHT = map(sin(BLINKSPD*v), THRESH, 1.0, 100, 0);
+          }
+          break;
+        case 1: 
+          translate(26*frameSizeX/40, 4*height/12);
+          rotate(v);
+          if (sin(BLINKSPD*v+2*PI/3) > THRESH) {
+            BRIGHT = map(sin(BLINKSPD*v+2*PI/3), THRESH, 1.0, 100, 0);
+          }
+          break;
+        case 2: 
+          translate(frameSizeX/2, 8*height/12);
+          rotate(v);
+          if (sin(BLINKSPD*v+4*PI/3) > THRESH) {
+            BRIGHT = map(sin(BLINKSPD*v+4*PI/3), THRESH, 1.0, 100, 0);
+          }
+          break;
+        }
+
+        for (int e=0; e<=4; e++) {
+          for (int f=0; f<=4; f++) {
+            if (!(e==0&&f==0)  &&  !(e==4&&f==0)  &&  !(e==0&&f==4)  &&  !(e==4&&f==4)  &&  !(e==2&&f==2)) {
+              drawQuadLED(LEN*e-2*LEN, LEN*f-2*LEN, round(BRIGHT*presetBrightness/100));
+            }
+          }
+        }
+        popMatrix();
+      }
+
+      v += map(float(presetSpeed), 0, 100, -0.06, 0.06);
+      rectMode(CORNER);
+      break;
+      
+    /* MediaPipe Spot Follower - AUTO TRACKING */
+    case 32:
+      noStroke();
+      
+      if (mediaPipeDataReceived) {
+        // MODO TRACKING: Logo AeroTrax siguiendo la nariz
+        image(AeroTraxBall, mpNoseX - 3*presetSize, mpNoseY - 3*presetSize, 6*presetSize, 6*presetSize);
+        
+        // Spots adicionales en puntos de tracking
+        float spotSize = map(presetSize, 0, 100, 20, 100);
+        float brightness = presetBrightness * 255 / 100;
+        
+        // Spot semi-transparente en nariz
+        if (multiColor) {
+          fill(presetColor, brightness * 0.3);
+        }
+        ellipse(mpNoseX, mpNoseY, spotSize * 1.5, spotSize * 1.5);
+        
+        // Muñeca izquierda
+        if (multiColor) {
+          fill(multiColorclr, brightness);
+        }
+        ellipse(mpLeftWristX, mpLeftWristY, spotSize * 0.8, spotSize * 0.8);
+        
+        // Muñeca derecha
+        if (multiColor) {
+          fill(presetColor, brightness);
+        }
+        ellipse(mpRightWristX, mpRightWristY, spotSize * 0.8, spotSize * 0.8);
+        
+        // Hombros con efecto de glow
+        pushMatrix();
+        translate(mpLeftShoulderX, mpLeftShoulderY);
+        for (int i = 3; i > 0; i--) {
+          fill(multiColor ? multiColorclr : presetColor, brightness / i);
+          ellipse(0, 0, spotSize * 0.6 * i * 0.5, spotSize * 0.6 * i * 0.5);
+        }
+        popMatrix();
+        
+        pushMatrix();
+        translate(mpRightShoulderX, mpRightShoulderY);
+        for (int i = 3; i > 0; i--) {
+          fill(multiColor ? presetColor : multiColorclr, brightness / i);
+          ellipse(0, 0, spotSize * 0.6 * i * 0.5, spotSize * 0.6 * i * 0.5);
+        }
+        popMatrix();
+        
+        // Líneas conectoras (efecto esqueleto)
+        stroke(multiColor ? multiColorclr : presetColor, brightness * 0.5);
+        strokeWeight(presetSize * 0.3);
+        line(mpLeftShoulderX, mpLeftShoulderY, mpRightShoulderX, mpRightShoulderY);
+        line(mpLeftShoulderX, mpLeftShoulderY, mpLeftWristX, mpLeftWristY);
+        line(mpRightShoulderX, mpRightShoulderY, mpRightWristX, mpRightWristY);
+        line(mpLeftShoulderX, mpLeftShoulderY, mpNoseX, mpNoseY);
+        line(mpRightShoulderX, mpRightShoulderY, mpNoseX, mpNoseY);
+        
+      } else {
+        // Mostrar logo siguiendo el ratón mientras espera datos
+        image(AeroTraxBall, (drawTranslateMode ? frameSizeX/2 : mouseX)-3*presetSize, (drawTranslateMode ? height/2 : mouseY)-3*presetSize, 6*presetSize, 6*presetSize);
+        
+        // Mensaje dentro del área de proyección
+        textAlign(CENTER, CENTER);
+        textSize(30);
+        fill(255, 200, 0);
+        text("ESPERANDO DATOS DE TRACKER", frameSizeX/2, 100);
+        textSize(20);
+        fill(150, 150, 150);
+        text("Paquetes UDP: " + udpPacketsReceived, frameSizeX/2, 150);
+        text("Asegúrate de que el tracker esté iniciado", frameSizeX/2, 200);
+      }
+      break;
+
+    default: 
+      break;
+    }
+  } 
+
+  popMatrix();
+
+  if (!hideControlWindow) {
+    thread("getMiniImage");   //Copy animation for mini image in control window, do this in a seperate thread
+  }
+
+  fill(editFrameSize ? 255 : 0); 
+  noStroke();
+  rect(frameSizeX, 0, cmdWindowWidth, height);  // background of Control Window
+  lockscreen = false;
+
+
+  if (!pass.equals(realPass)) {     // Start (Lock-) screen
+    lockscreen = true;
+    textAlign(CENTER);
+    textSize(78); 
+    fill(0, 200, 255);
+    text("Blaize 3", frameSizeX+310, 180);
+    //textSize(40);
+    //text("©", frameSizeX+480, 140);
+    textSize(27); 
+    fill(255);
+    text("Spice up your Beamer.", frameSizeX+314, 208);
+    textSize(20); 
+    fill(255);
+    text("Please subscribe to\nBodgedButWorks on YouTube\nand follow me on instagram!\n", frameSizeX+320, 350);
+    //text("www.aerotrax.de", frameSizeX+320, 380);
+    textSize(20); 
+    fill(0, 200, 255);
+
+    for (int u=0; u<pass.length(); u++) {
+      text(random(0, 100)>50 ? "|||" : "||", frameSizeX+230+15*u, 500);
+    }
+
+    text("Please enter Password", frameSizeX+320, 550);
+
+    try {                                // Get IP Adress, Handle Exceptions
+      inet = InetAddress.getLocalHost();
+      myIP = inet.getHostAddress();
+    }
+    catch (Exception e) {
+      e.printStackTrace();
+      myIP = "IP not available";
+    }
+
+    textSize(20); 
+    fill(0, 200, 255);
+    text("IP: " + myIP, frameSizeX+315, 590);
+    pushMatrix();
+    rotate(-HALF_PI);
+    textSize(40); 
+    fill(255);
+    text("An AeroTrax application", -355, frameSizeX+120);
+    stroke(255); 
+    strokeWeight(5);
+    line(-592, frameSizeX+140, -120, frameSizeX+140);
+    popMatrix();
+    time2 = millis();
+    textAlign(CENTER, CENTER);
+  } else if (millis()-time2 < 8000  &&  dontShowStartupScreenAnymore == false) {
+    flag = false;
+    textAlign(CENTER);
+    textSize(78); 
+    fill(0, 200, 255);
+    text("Blaize 3", frameSizeX+310, 180);
+    //textSize(40);
+    //text("©", frameSizeX+480, 140);
+    textSize(27); 
+    fill(255);
+    text("Spice up your Beamer.", frameSizeX+314, 208);
+    textSize(20); 
+    fill(255);
+    text("Please subscribe to\nBodgedButWorks on YouTube\nand follow me on instagram!", frameSizeX+320, 350);
+    //text("www.aerotrax.de", frameSizeX+320, 380);
+    textSize(20); 
+    fill(0, 200, 255);
+    text("Strg + <^v>:  Change window size", frameSizeX+345, 550);
+    //text("Shift + arrow keys: "    ,frameSizeX+325,590);
+    text("Click to continue", frameSizeX+256, 590);
+    pushMatrix();
+    rotate(-HALF_PI);
+    textSize(40); 
+    fill(255);
+    text("An AeroTrax application", -355, frameSizeX+120);
+    stroke(255); 
+    strokeWeight(5);
+    line(-592, frameSizeX+140, -120, frameSizeX+140);
+    popMatrix();
+
+    if (mousePressed) {
+      dontShowStartupScreenAnymore = true;
+    }
+    textAlign(CENTER, CENTER);
+  } else {
+    // Auto-hide desactivado - usar doble clic o F11 para control manual
+    // if (millis()-lastMouseMovedTime >= 5000) {    
+    //   hideControlWindow = true;
+    // }
+
+    if (!hideControlWindow) {
+      if (upperPage == 0) {
+        image(page1presetPix, frameSizeX, 0);
+        for (int i=0; i<=15; i++) {  
+          S[i].display();
+        }
+      } else if (upperPage == 1) {
+        image(page2presetPix, frameSizeX, 0);
+        for (int i=16; i<=31; i++) {  
+          S[i].display();
+        }
+      }
+      
+      // Botones de navegación DESPUÉS de los presets
+      drawUpperPageButtons();
+      drawLowerPageButtons();
+
+      if (lowerPage == 0) {
+        for (int i=32; i<=39; i++) {  
+          S[i].display();
+        }
+        for (int i=0; i<=3; i++) {  
+          X[i].display();
+        }
+      } else if (lowerPage == 1) {
+        for (int v=0; v<=4; v++) {  
+          O[v].display();
+        }
+        for (int v=6; v<=8; v++) {  
+          O[v].display();
+        }
+        for (int v=6; v<=6; v++) {  
+          X[v].display();
+        }
+        
+        // Botones para navegar entre logos (clic derecho para cargar)
+        drawLogoNavigationButtons();
+        
+      } else if (lowerPage == 2) {
+        for (int v=5; v<=5; v++) {  
+          O[v].display();
+        }
+
+        fill(30); 
+        noStroke();
+        rect(LMZxpos+frameSizeX, LMZypos, LMZxsize, LMZysize);     // "Line Move Zone"
+        fill(80);
+        rect(LMZxpos+frameSizeX+LMZxsize/4, LMZypos+LMZysize/4, LMZxsize/2, LMZysize/2);
+
+        if (mousePressed && mouseButton == LEFT && mouseX>LMZxpos+frameSizeX && mouseX<(LMZxpos+frameSizeX+LMZxsize) && mouseY>LMZypos && mouseY<(LMZypos+LMZysize)) {
+          presetPos.add(new PVector(mouseX, mouseY));
+        }
+
+        stroke(0); 
+        strokeWeight(4);
+        for (int u=1; u<presetPos.size(); u++) {
+          line(presetPos.get(u-1).x, presetPos.get(u-1).y, presetPos.get(u).x, presetPos.get(u).y);
+        }
+      }
+    }
+
+
+
+
+    // NETWORKING __________________________________________________________________________________________________________________________________  
+    try {  
+      CC = s.available();
+    }   // Receive data from WiFi Console
+    catch(Exception e) {
+    }
+
+    if (CC != null) {
+      String input = CC.readString();
+      String[] vals1 = splitTokens(input, "C\n");
+
+      int _adress = -1;
+      int _data   = -1;
+
+      for (int k=0; k<vals1.length; k++) {
+        String[] vals2 = split(vals1[k], 'V');
+        if (vals2.length == 2) {
+          _adress = int(vals2[0]);
+          _data   = int(vals2[1]);
+        } else {
+          _adress = -1;
+          _data   = -1;
+        }
+
+
+        if (_adress <= 31  &&  _data == 0) {                                                 // 0-31 Presets, 32-35 Color buttons
+          S[_adress].doStuff();
+        } else if (_adress == 32  &&  _data >= 0  &&  _data <= 7) {                            // Color Buttons 0-7
+          S[32+_data].doStuff();
+        }
+
+        //adress 33, 34, 35 now free (formerly Color Buttons Green, Blue, Random)
+
+        else if (_adress >= 36  &&  _adress <= 42) {                                         // onoffbuttons
+          if (_data == 1) {  
+            O[_adress-36].buttonState =  true; 
+            O[_adress-36].doStuff();
+          }
+          if (_data == 0) {  
+            O[_adress-36].buttonState = false; 
+            O[_adress-36].doStuff();
+          }
+        }
+
+        // Adress 43 is currently free
+
+        else if (_adress >= 44  &&  (_adress != 48  &&  _adress != 49)  &&  _adress <= 50  &&  _data >= 0  &&  _data <= 100) {       // Sliders
+          X[_adress-44].value = _data;
+          X[_adress-44].doStuff();
+        } else if (_adress >= 51  &&  _adress <= 52) {                                         // Nudge +  &  Nudge -
+          if (_data == 1) {  
+            O[_adress-45].buttonState =  true; 
+            O[_adress-45].doStuff();
+          }
+        } else if (_adress == 254  &&  _data >= 60  &&  _data <= 180) {                        // bpm set value
+          bpm = _data;
+        } else if (_adress == 255) {                                                           // XY translation control
+          //println(binary(_data)); println(_data); print(" "); println(_data >> 16);
+          fromWiFi_X = 0;
+          fromWiFi_Y = 0;
+        }  //Aufteilung von 32 bit auf 2 x 16 bit (0-32768) für X & Y
+      }
+    }
+  }
+  
+  // Llamar hook del patch al FINAL (para dibujar sobre el panel)
+  patch_draw();
+}
+
+
+
+
+
+
+
+
+
+//________________________ Functions for extra Threads _______________________________//
+void getMiniImage() {
+  miniImage = get(0, 0, frameSizeX, height);
+}
+
+
+
+
+
+void mousePressed() {
+  // Llamar hook del patch
+  patch_mousePressed();
+  
+  // Detectar doble clic para alternar fullscreen
+  int currentTime = millis();
+  int projectionWidth = getProjectionWidth();
+  
+  if (mouseButton == LEFT && mouseX < projectionWidth && !lockscreen) {
+    if (currentTime - lastClickTime < doubleClickThreshold) {
+      shouldToggleFullscreen = true;
+      lastClickTime = 0;
+      println("✓ Doble clic detectado - alternando fullscreen");
+      return;
+    }
+    lastClickTime = currentTime;
+  }
+  
+  if (mouseButton == LEFT) {
+    flag  = true;
+
+    if (lowerPage == 2 && mouseX>LMZxpos+frameSizeX && mouseX<(LMZxpos+frameSizeX+LMZxsize) && mouseY>LMZypos && mouseY<(LMZypos+LMZysize)) {  
+      presetPos.clear();
+    }
+  } else if (mouseButton == CENTER) {
+    if (mouseY <= 340) {
+      upperPage = 0;
+    } else {
+      lowerPage = 0;
+    }
+  }
+}
+
+
+void mouseReleased() {
+  O[1].buttonState = false;    // Blackout off
+
+  if (mouseX>(O[1].xpos+frameSizeX+10) && mouseX<(O[1].xpos+frameSizeX+O[1].xsize-10) && mouseY>(O[1].ypos+10) && mouseY<(O[1].ypos+O[1].ysize-10)) {
+    O[1].doStuff();
+  }
+  
+  // Resetear el control de click derecho
+  rightClickProcessed = false;
+}
+
+
+void mouseMoved() {              // Mouse moved while not clicked
+  hideControlWindow = false;
+  lastMouseMovedTime = millis();
+}
+
+
+void mouseDragged() {            // Mouse moved while clicked
+  hideControlWindow = false;
+  lastMouseMovedTime = millis();
+}
+
+
+void keyPressed() {
+  if (key != CODED) {
+
+    if (key == ESC) {
+      key = 0;
+    } else if (key == 8) {     //backspace
+      pass = "";
+    } else if (key >= 32  &&  key <= 126  &&  lockscreen == true) {
+      pass = pass + key;
+    } else if (lockscreen == false  &&  (key == 'h'  ||  key == 'H')) {
+      O[6].buttonState = !O[6].buttonState;
+      O[6].doStuff();
+    }
+    // Navegación de galería de logos
+    else if (lockscreen == false && key == '1') {
+      prevLogo();
+    } else if (lockscreen == false && key == '2') {
+      nextLogo();
+    }
+    // Tecla F para fullscreen (funciona siempre)
+    else if ((key == 'f' || key == 'F') && lockscreen == false) {
+      shouldToggleFullscreen = true;
+      println("✓ F presionado - alternando fullscreen");
+    }
+    // Tecla D para alternar debug info en preset 15
+    else if ((key == 'd' || key == 'D') && lockscreen == false) {
+      showDebugInfo = !showDebugInfo;
+      println("✓ Debug info preset 15: " + (showDebugInfo ? "VISIBLE" : "OCULTO"));
+    }
+  }
+
+  if (key == CODED) {
+    if (keyCode == KeyEvent.VK_END) {
+      pass = "";
+      lockscreen = true;
+    }
+    
+    // F11 para alternar fullscreen
+    else if (keyCode == KeyEvent.VK_F11 && lockscreen == false) {
+      shouldToggleFullscreen = true;
+      println("✓ F11 presionado - alternando fullscreen");
+    }
+
+    //else if(keyCode == SHIFT){
+    //  editFramePos = true;
+    //}
+    
+    else if (keyCode == CONTROL  ||  keyCode == KeyEvent.VK_META) {
+      editFrameSize = true;
+    }
+
+    //if(editFramePos == true  &&  lockscreen == false){
+    //  if     (keyCode == LEFT) { framePosX = framePosX-10; }
+    //  else if(keyCode == RIGHT){ framePosX = framePosX+10; }
+    //  else if(keyCode == UP)   { framePosY = framePosY-10; }
+    //  else if(keyCode == DOWN) { framePosY = framePosY+10; }
+    
+    } if (editFrameSize) {
+      if(keyCode == LEFT) { 
+        frameSizeX = frameSizeX-10;
+      } else if (keyCode == RIGHT) { 
+        frameSizeX = frameSizeX+10;
+      } else if (keyCode == UP) { 
+        frameSizeY = frameSizeY-10;
+      } else if (keyCode == DOWN) { 
+        frameSizeY = frameSizeY+10;
+      }
+      surface.setSize(frameSizeX+cmdWindowWidth, frameSizeY);
+    }
+  //}
+}
+
+
+void keyReleased() {
+  if (key == CODED) {
+
+    //if(keyCode == SHIFT){
+    //  editFramePos = false;  }
+
+    if (keyCode == CONTROL  ||  keyCode == KeyEvent.VK_META) {
+      editFrameSize = false;
+    }
+  }
+}
+
+
+
+
+void drawQuadLED(int _x, int _y, int _bright) {
+  int SIZE = round(8*(presetSize+50)/100);
+  if (red(  presetColor) > 0  ||  (multiColor ? red(  multiColorclr) : -1) > 0) { 
+    fill(255, 0, 0, _bright*255/100); 
+    rect(_x-SIZE-1, _y-SIZE-1, _x-1, _y-1);
+  }
+  if (green(presetColor) > 0  ||  (multiColor ? green(multiColorclr) : -1) > 0) { 
+    fill(0, 255, 0, _bright*255/100); 
+    rect(_x+1, _y-SIZE-1, _x+SIZE+1, _y-1);
+  }
+  if (blue( presetColor) > 0  ||  (multiColor ? blue( multiColorclr) : -1) > 0) { 
+    fill(0, 0, 255, _bright*255/100); 
+    rect(_x-SIZE-1, _y+1, _x-1, _y+SIZE+1);
+  }
+  if (red(presetColor) > 0  &&  green(presetColor) > 0  &&  blue(presetColor) > 0) { 
+    fill(255, 255, 255, _bright*255/100); 
+    rect(_x+1, _y+1, _x+SIZE+1, _y+SIZE+1);
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class kreis {    // PingPong-Spotlight-Balls
+  float posX;
+  float posY;
+  float spdX;
+  float spdY;
+
+  kreis() {
+    posX = random(200, frameSizeX-200);
+    posY = random(200, height-200);
+    spdX = random(10, 30);
+    spdY = random(10, 30);
+  }
+
+  void move() {
+    int ballSize = int(map(presetSize+1, 0, 100, 300, 40));
+
+    if (posX <= ballSize/2) {                          // Wall bounceback
+      posX = ballSize/2;
+      spdX = -spdX;
+    } else if (posX >= frameSizeX-ballSize/2) {
+      posX = frameSizeX-ballSize/2;
+      spdX = -spdX;
+    }
+    if (posY <= ballSize/2) {
+      posY = ballSize/2;
+      spdY = -spdY;
+    } else if (posY >= height-ballSize/2) {
+      posY = height-ballSize/2;
+      spdY = -spdY;
+    }
+
+    posX += map(presetSpeed+1, 0, 100, 0, 1)*spdX;     // Move according to presetSpeed & direction
+    posY += map(presetSpeed+1, 0, 100, 0, 1)*spdY;
+    ellipse(posX, posY, ballSize, ballSize);
+  }
+}
+
+
+
+
+
+
+class rectbutton {
+  color clr;
+  int xpos, ypos, xsize, ysize, xmiddle, ymiddle, index;
+  String modifier;
+  boolean mouseOver = false;
+
+  rectbutton(color _clr, int _xpos, int _ypos, int _xsize, int _ysize, int _index, String _modifier) {
+    clr      = _clr;
+    xpos     = _xpos;
+    ypos     = _ypos;
+    xsize    = _xsize;
+    ysize    = _ysize;
+    xmiddle  = _xpos + _xsize/2;
+    ymiddle  = _ypos + _ysize/2;
+    index    = _index;
+    modifier = _modifier;
+  }
+
+
+
+  void display() {
+    if (modifier == "PRESET") {
+      if (presetNumber == index) {
+        fill(0); 
+        stroke(255); 
+        strokeWeight(1);
+        rect(xpos+frameSizeX, ypos, xsize, ysize);
+        //image(miniImage, xpos+frameSizeX+1, ypos+1, constrain(ysize*(xpos+frameSizeX)/height, 10, 150)-1, ysize-1);
+      }
+      
+      // Dibujar número del preset
+      fill(presetNumber == index ? 255 : 150);
+      textAlign(CENTER, CENTER);
+      textSize(20);
+      text(index, xpos+frameSizeX+xsize/2, ypos+ysize/2);
+    }
+
+    if (mouseX>(xpos+frameSizeX+10) && mouseX<(xpos+frameSizeX+xsize-10) && mouseY>(ypos+10) && mouseY<(ypos+ysize-10)) {
+      if (flag == true  &&  mousePressed) {
+        flag = false;
+        doStuff();
+      }
+
+      if (modifier == "PRESET") {       // Mouseover @ Preset buttons
+        stroke(255); 
+        strokeWeight(1);
+      } else if (modifier == "COLOR") {
+        noStroke();
+        mouseOver = true;
+      }
+    } else {      // no Mouseover
+      noStroke();
+      mouseOver = false;
+    }
+
+    if (modifier == "PRESET") {
+      noFill();
+    } else {
+      fill(clr);
+    }
+
+    rect(xpos+frameSizeX, ypos, xsize, ysize);
+    fill(0); 
+    textSize(2*ysize/3);
+
+    if (!multiColor) {
+      if (clr == presetColor) {
+        text("1", xmiddle+frameSizeX, ymiddle-6);
+      }
+    } else if (multiColor) {
+      if (clr == multiColorclr) {
+        text("1", xmiddle+frameSizeX, ymiddle-6);
+      } else if (clr == presetColor) {
+        text("2", xmiddle+frameSizeX, ymiddle-6);
+      }
+    }
+
+    if (mouseOver) {
+      fill(100);
+      text(multiColor ? "2" : "1", xmiddle+frameSizeX, ymiddle-6);
+    }
+  }
+
+
+
+  void doStuff() {
+    if (modifier == "PRESET") {
+      presetNumber = index;
+      v = random(0.1, 1);
+      m = 0;
+
+      if (index == 8) {    //mini-dots-discoball
+        for (int x=0; x<1000; x++) {
+          ranX[x] = int(random(-0.71*frameSizeX, 0.71*frameSizeX));
+          ranY[x] = int(random(-0.71*frameSizeX, 0.71*frameSizeX));
+        }
+      }
+    } else if (modifier == "COLOR") {
+      if (index==0) {
+        //presetColor = clr;
+        presetColor = presetColor==clr ? color(255) : clr;
+      } else {
+        do {  
+          presetColor = color(random(0, 254), random(0, 254), random(0, 254));
+        } while (brightness(presetColor) < 100);
+      }
+    }
+  }
+}
+
+
+
+
+
+
+class onoffbutton {
+  color clr;
+  int xpos, ypos, xsize, ysize, xmiddle, ymiddle, index;
+  String modifier;
+  boolean buttonState = false;
+
+  onoffbutton(color _clr, int _xpos, int _ypos, int _xsize, int _ysize, int _index, String _modifier) {
+    clr    = _clr;
+    xpos   = _xpos;
+    ypos   = _ypos;
+    xsize  = _xsize;
+    ysize  = _ysize;
+    xmiddle  = _xpos + _xsize/2;
+    ymiddle  = _ypos + _ysize/2;
+    index  = _index;
+    modifier = _modifier;
+  }
+
+  void display() {
+    if (mouseX>(xpos+frameSizeX+10) && mouseX<(xpos+frameSizeX+xsize-10) && mouseY>(ypos+10) && mouseY<(ypos+ysize-10)) {
+      if (flag == true  &&  mousePressed) {
+        flag = false;
+        buttonState = !buttonState;
+        doStuff();
+      }
+
+      stroke(0);
+    } else {  
+      noStroke();
+    }
+
+    if (buttonState  &&  modifier != "+"  &&  modifier != "-"  &&  modifier != "Hide (h)"  &&  modifier != "Nudge +"  &&  modifier != "Nudge -"  &&  modifier != "Hand Spots") {
+      fill(80);
+    } else {
+      fill(50);
+    }
+    strokeWeight(10);
+    rect(xpos+frameSizeX, ypos, xsize, ysize);
+    textSize(ysize/6+10); 
+    fill(0);
+    if (modifier == "BPM") {  
+      text("BPM " + bpm, xmiddle+frameSizeX, ymiddle-4);
+    } else {  
+      text(modifier, xmiddle+frameSizeX, ymiddle-4);
+    }
+  }
+
+  void doStuff() {
+    if     (modifier == "Multicolor") {  
+      multiColor = buttonState; 
+      multiColorclr = presetColor;
+    } else if (modifier == "Line Move" ) {  
+      drawTranslateMode = buttonState; 
+      fromWiFi_X = 8; 
+      fromWiFi_Y = 8;
+    }  //also reset the extra translation by Smartphone
+    else if (modifier == "BPM"       ) {  
+      bpmSTLmode = buttonState; 
+      bpmSTLtime = 0; 
+      bpmSwitchCounter = -1;
+    } else if (modifier == "Blackout"  ) {  
+      presetBrightness = buttonState ? 0 : 100;
+      X[2].value = buttonState ? 0 : 100;
+    } else if (modifier == "+"         ) {  
+      bpm = constrain(bpm+1, 60, 150);
+    } else if (modifier == "-"         ) {  
+      bpm = constrain(bpm-1, 60, 150);
+    } else if (modifier == "Hide (h)"  ) {  
+      hideControlWindow = buttonState;
+    } else if (modifier == "Nudge +"   ) {  
+      bpmSTLtime -= bpmConstant/(20*bpm);
+    } else if (modifier == "Nudge -"   ) {  
+      bpmSTLtime += bpmConstant/(20*bpm);
+    } else if (modifier == "Hand Spots") {
+      showHandSpots = buttonState;
+    }
+  }
+}
+
+
+
+
+
+
+
+
+class slider {
+  color bgclr, clr;
+  int xpos, ypos, xsize, ysize, xmiddle, ymiddle;
+  int value = 50;
+  String modifier;
+
+  slider(color _bgclr, color _clr, int _xpos, int _ypos, int _xsize, int _ysize, String _modifier) {
+    bgclr  = _bgclr;
+    clr    = _clr;
+    xpos   = _xpos;
+    ypos   = _ypos;
+    xsize  = _xsize;
+    ysize  = _ysize;
+    xmiddle  = _xpos + _xsize/2;
+    ymiddle  = _ypos + _ysize/2;
+    modifier = _modifier;
+  }
+
+  void display() {
+    noStroke(); 
+    fill(bgclr);
+    rect(xpos+frameSizeX, ypos, xsize, ysize);
+    fill(clr); 
+    textSize(ysize/3.5);
+    text(modifier, xpos+frameSizeX+540, ypos+45);
+
+    if (mouseX>xpos+frameSizeX && mouseX<(xpos+frameSizeX+xsize) && mouseY>ypos && mouseY<(ypos+ysize)) {
+      fill(clr);
+      rect(xpos+frameSizeX, ypos, xsize*constrain(map(mouseX, xpos+frameSizeX, xpos+frameSizeX+xsize, 0, 100), 0, 100)/101, ysize);
+      textSize(ysize/3); 
+      fill(130);
+      text(int(constrain(map(mouseX, xpos+frameSizeX, xpos+frameSizeX+xsize, -5, 105), 0, 100)), xmiddle+frameSizeX, ymiddle-4);
+      if (mousePressed  &&  mouseButton == LEFT) {
+        flag = false;
+        value = int(constrain(map(mouseX, xpos+frameSizeX, xpos+frameSizeX+xsize, -5, 105), 0, 100));
+        doStuff();
+      }
+    } else {  
+      fill(clr);
+      rect(xpos+frameSizeX, ypos, xsize*value/101, ysize);
+      textSize(ysize/3); 
+      fill(130);
+      text(value, xmiddle+frameSizeX, ymiddle-4);
+    }
+  }
+
+  void doStuff() {
+    if     (modifier == "Speed"      ) {  
+      presetSpeed      = value;
+    } else if (modifier == "Size"       ) {  
+      presetSizeDestination       = value;
+    } else if (modifier == "Brightness" ) {  
+      presetBrightnessDestination = value;
+    } else if (modifier == "Strobing"   ) {  
+      presetStrobing   = value;
+    } else if (modifier == "Shading"    ) {  
+      shadeAmount      = value;
+    }
+  }
+}
+
+// ============================================
+// GALERÍA DE LOGOS
+// ============================================
+void loadLogoGallery() {
+  java.io.File folder = new java.io.File(dataPath("logos"));
+  
+  if (!folder.exists()) {
+    println("⚠️ Carpeta 'data/logos' no existe. Creándola...");
+    folder.mkdirs();
+    // Solo usar AeroTrax por defecto
+    logoGallery = new PImage[1];
+    logoNames = new String[1];
+    logoGallery[0] = AeroTraxBall;
+    logoNames[0] = "AeroTrax (default)";
+    totalLogos = 1;
+    println("✓ Usa la carpeta 'data/logos' para añadir tus propias imágenes");
+    return;
+  }
+  
+  // Filtrar solo archivos de imagen
+  java.io.File[] files = folder.listFiles(new java.io.FilenameFilter() {
+    public boolean accept(java.io.File dir, String name) {
+      String lower = name.toLowerCase();
+      return lower.endsWith(".png") || lower.endsWith(".jpg") || 
+             lower.endsWith(".jpeg") || lower.endsWith(".gif");
+    }
+  });
+  
+  if (files == null || files.length == 0) {
+    println("⚠️ No hay imágenes en 'data/logos'. Usando solo AeroTrax.");
+    logoGallery = new PImage[1];
+    logoNames = new String[1];
+    logoGallery[0] = AeroTraxBall;
+    logoNames[0] = "AeroTrax (default)";
+    totalLogos = 1;
+    return;
+  }
+  
+  // Cargar todas las imágenes
+  logoGallery = new PImage[files.length + 1];  // +1 para AeroTrax
+  logoNames = new String[files.length + 1];
+  
+  // Primer logo siempre es AeroTrax
+  logoGallery[0] = AeroTraxBall;
+  logoNames[0] = "AeroTrax (default)";
+  
+  int loadedCount = 1;
+  for (int i = 0; i < files.length; i++) {
+    try {
+      PImage img = loadImage("logos/" + files[i].getName());
+      if (img != null) {
+        logoGallery[loadedCount] = img;
+        logoNames[loadedCount] = files[i].getName();
+        loadedCount++;
+        println("✓ Logo cargado: " + files[i].getName());
+      }
+    } catch (Exception e) {
+      println("✗ Error cargando: " + files[i].getName());
+    }
+  }
+  
+  totalLogos = loadedCount;
+  println("✓ Galería cargada: " + totalLogos + " logos");
+}
+
+void nextLogo() {
+  currentLogoIndex = (currentLogoIndex + 1) % totalLogos;
+  println("➡️ Logo: " + logoNames[currentLogoIndex]);
+}
+
+void prevLogo() {
+  currentLogoIndex = (currentLogoIndex - 1 + totalLogos) % totalLogos;
+  println("⬅️ Logo: " + logoNames[currentLogoIndex]);
+}
+
+PImage getCurrentLogo() {
+  return logoGallery[currentLogoIndex];
+}
+
+// Botones de navegación de galería
+void drawLogoNavigationButtons() {
+  int baseY = 660;  // Debajo del botón de cargar imágenes
+  int btnW = 150;
+  int btnH = 80;
+  int spacing = 5;
+  int startX = frameSizeX + 5;
+  
+  // Dibujar 4 botones en una fila
+  for (int i = 0; i < 4; i++) {
+    int btnX = startX + i * (btnW + spacing);
+    
+    // Verificar si el mouse está sobre este botón
+    boolean mouseOver = mouseX > btnX && mouseX < btnX + btnW && 
+                        mouseY > baseY && mouseY < baseY + btnH;
+    
+    // Color del botón - resaltado si es el logo actual
+    boolean isSelected = (i < totalLogos && i == currentLogoIndex);
+    color btnColor;
+    if (isSelected) {
+      btnColor = mouseOver ? color(0, 200, 255) : color(0, 150, 200);
+    } else {
+      btnColor = mouseOver ? color(80, 80, 80) : color(50, 50, 50);
+    }
+    
+    fill(btnColor);
+    stroke(isSelected ? color(0, 255, 255) : color(150, 150, 150));
+    strokeWeight(isSelected ? 3 : 2);
+    rect(btnX, baseY, btnW, btnH, 5);
+    
+    // Si hay un logo en este índice, mostrar miniatura
+    if (i < totalLogos && logoGallery[i] != null) {
+      // Dibujar miniatura del logo
+      int thumbSize = 60;
+      int thumbX = btnX + (btnW - thumbSize) / 2;
+      int thumbY = baseY + 5;
+      
+      // Fondo de la miniatura
+      fill(20);
+      noStroke();
+      rect(thumbX, thumbY, thumbSize, thumbSize);
+      
+      // Dibujar logo
+      image(logoGallery[i], thumbX + 2, thumbY + 2, thumbSize - 4, thumbSize - 4);
+      
+      // Nombre del logo (abreviado)
+      fill(255);
+      textSize(9);
+      textAlign(CENTER, TOP);
+      String displayName = logoNames[i];
+      if (displayName.length() > 15) {
+        displayName = displayName.substring(0, 12) + "...";
+      }
+      text(displayName, btnX + btnW/2, baseY + btnH - 12);
+      
+      // Click IZQUIERDO = Seleccionar logo
+      if (mouseOver && mousePressed && flag && mouseButton == LEFT) {
+        flag = false;
+        currentLogoIndex = i;
+        println("✓ Logo seleccionado: " + logoNames[i]);
+      }
+      
+      // Click DERECHO = Reemplazar con nueva imagen
+      if (mouseOver && mousePressed && mouseButton == RIGHT && !rightClickProcessed) {
+        rightClickProcessed = true;
+        logoSlotToLoad = i;
+        selectInput("Reemplazar logo del slot " + (i+1), "logoSlotSelected");
+      }
+    } else {
+      // Slot vacío - mostrar símbolo para cargar imagen
+      fill(100, 100, 100);
+      textSize(40);
+      textAlign(CENTER, CENTER);
+      text("+", btnX + btnW/2, baseY + btnH/2 - 10);
+      
+      fill(150, 150, 150);
+      textSize(10);
+      text("Click Der.", btnX + btnW/2, baseY + btnH/2 + 20);
+      
+      // Click derecho para cargar nueva imagen
+      if (mouseOver && mousePressed && mouseButton == RIGHT && !rightClickProcessed) {
+        rightClickProcessed = true;
+        logoSlotToLoad = i;
+        selectInput("Selecciona una imagen para el slot " + (i+1), "logoSlotSelected");
+      }
+    }
+  }
+  
+  // Indicador de logo actual
+  fill(255, 255, 0);
+  textSize(12);
+  textAlign(CENTER, TOP);
+  text("Logo activo: " + (currentLogoIndex + 1) + "/" + totalLogos, frameSizeX + 310, baseY + btnH + 8);
+}
+
+// ============================================
+// BOTONES DE NAVEGACIÓN DE PÁGINAS
+// ============================================
+
+void drawUpperPageButtons() {
+  // Botones debajo de la sección de configuración
+  int panelX = getControlPanelX();  // Posición X del panel de control
+  int btnY = 770;  // Debajo de los sliders de configuración
+  int btnW = 70;
+  int btnH = 30;
+  int spacing = 15;
+  
+  // Fondo para los botones
+  fill(25);
+  noStroke();
+  rect(panelX, btnY, cmdWindowWidth, btnH + 10);
+  
+  // Centrar horizontalmente en el panel
+  int totalWidth = btnW + spacing + 100 + spacing + btnW;
+  int startX = panelX + (cmdWindowWidth - totalWidth) / 2;
+  
+  // Botón izquierdo (página anterior)
+  int btnLeftX = startX;
+  boolean mouseOverLeft = mouseX > btnLeftX && mouseX < btnLeftX + btnW && 
+                          mouseY > btnY + 5 && mouseY < btnY + 5 + btnH;
+  fill(mouseOverLeft ? 80 : 50);
+  stroke(0, 200, 255);
+  strokeWeight(2);
+  rect(btnLeftX, btnY + 5, btnW, btnH);
+  
+  fill(255);
+  textSize(14);
+  textAlign(CENTER, CENTER);
+  text("◀", btnLeftX + btnW/2, btnY + 5 + btnH/2);
+  
+  // Indicador de página (centro)
+  fill(0, 200, 255);
+  textSize(12);
+  text("PRESETS " + (upperPage + 1) + "/2", startX + btnW + spacing + 50, btnY + 5 + btnH/2);
+  
+  // Botón derecho (página siguiente)
+  int btnRightX = startX + btnW + spacing + 100 + spacing;
+  boolean mouseOverRight = mouseX > btnRightX && mouseX < btnRightX + btnW && 
+                           mouseY > btnY + 5 && mouseY < btnY + 5 + btnH;
+  fill(mouseOverRight ? 80 : 50);
+  stroke(0, 200, 255);
+  strokeWeight(2);
+  rect(btnRightX, btnY + 5, btnW, btnH);
+  
+  fill(255);
+  textSize(14);
+  text("▶", btnRightX + btnW/2, btnY + 5 + btnH/2);
+  
+  // Detectar clics
+  if (mousePressed && flag && mouseButton == LEFT) {
+    if (mouseOverLeft) {
+      flag = false;
+      upperPage--;
+      if (upperPage < 0) upperPage = 1;
+    } else if (mouseOverRight) {
+      flag = false;
+      upperPage++;
+      if (upperPage > 1) upperPage = 0;
+    }
+  }
+}
+
+void drawLowerPageButtons() {
+  // Botones debajo de los botones de presets
+  int panelX = getControlPanelX();  // Posición X del panel de control
+  int btnY = 815;  // Debajo de upperPageButtons
+  int btnW = 70;
+  int btnH = 30;
+  int spacing = 15;
+  
+  // Fondo para los botones
+  fill(25);
+  noStroke();
+  rect(panelX, btnY, cmdWindowWidth, btnH + 10);
+  
+  // Centrar horizontalmente en el panel
+  int totalWidth = btnW + spacing + 100 + spacing + btnW;
+  int startX = panelX + (cmdWindowWidth - totalWidth) / 2;
+  
+  // Nombres de las páginas
+  String[] pageNames = {"PRESETS+", "HAND SPOTS", "LÍNEA"};
+  
+  // Botón izquierdo (página anterior)
+  int btnLeftX = startX;
+  boolean mouseOverLeft = mouseX > btnLeftX && mouseX < btnLeftX + btnW && 
+                          mouseY > btnY + 5 && mouseY < btnY + 5 + btnH;
+  fill(mouseOverLeft ? 80 : 50);
+  stroke(0, 200, 255);
+  strokeWeight(2);
+  rect(btnLeftX, btnY + 5, btnW, btnH);
+  
+  fill(255);
+  textSize(14);
+  textAlign(CENTER, CENTER);
+  text("◀", btnLeftX + btnW/2, btnY + 5 + btnH/2);
+  
+  // Indicador de página (centro)
+  fill(0, 200, 255);
+  textSize(12);
+  text("CONFIG: " + pageNames[lowerPage], startX + btnW + spacing + 50, btnY + 5 + btnH/2);
+  
+  // Botón derecho (página siguiente)
+  int btnRightX = startX + btnW + spacing + 100 + spacing;
+  boolean mouseOverRight = mouseX > btnRightX && mouseX < btnRightX + btnW && 
+                           mouseY > btnY + 5 && mouseY < btnY + 5 + btnH;
+  fill(mouseOverRight ? 80 : 50);
+  stroke(0, 200, 255);
+  strokeWeight(2);
+  rect(btnRightX, btnY + 5, btnW, btnH);
+  
+  fill(255);
+  textSize(14);
+  text("▶", btnRightX + btnW/2, btnY + 5 + btnH/2);
+  
+  // Detectar clics
+  if (mousePressed && flag && mouseButton == LEFT) {
+    if (mouseOverLeft) {
+      flag = false;
+      lowerPage--;
+      if (lowerPage < 0) lowerPage = 2;
+    } else if (mouseOverRight) {
+      flag = false;
+      lowerPage++;
+      if (lowerPage > 2) lowerPage = 0;
+    }
+  }
+}
+
+// ============================================
+// WINDOW SIZE HELPERS
+// ============================================
+
+// Obtener el ancho del área de proyección
+int getProjectionWidth() {
+  return hideControlWindow ? width : width - cmdWindowWidth;
+}
+
+// Obtener la posición X del panel de control
+int getControlPanelX() {
+  return width - cmdWindowWidth;
+}
+
+// ============================================
+// FULLSCREEN CONTROL
+// ============================================
+
+void toggleFullscreen() {
+  if (mainFrame != null && mainFrame instanceof JFrame) {
+    JFrame jframe = (JFrame) mainFrame;
+    if (!isFullscreen) {
+      // ENTRAR EN FULLSCREEN
+      normalBounds = jframe.getBounds();
+      
+      // Obtener el monitor donde está la ventana actualmente
+      GraphicsDevice currentDevice = jframe.getGraphicsConfiguration().getDevice();
+      Rectangle currentScreenBounds = currentDevice.getDefaultConfiguration().getBounds();
+      
+      jframe.dispose();
+      jframe.setUndecorated(true);
+      jframe.setLocation(currentScreenBounds.x, currentScreenBounds.y);
+      jframe.setSize(currentScreenBounds.width, currentScreenBounds.height);
+      jframe.setAlwaysOnTop(true);
+      jframe.setVisible(true);
+      surface.setSize(currentScreenBounds.width, currentScreenBounds.height);
+      frameSizeX = currentScreenBounds.width;
+      frameSizeY = currentScreenBounds.height;
+      hideControlWindow = true;
+      cmdWindowWidth = 0;
+      isFullscreen = true;
+      println("✓ Fullscreen activado - " + currentScreenBounds.width + "x" + currentScreenBounds.height);
+      println("  Monitor: " + currentDevice.getIDstring());
+      println("  Presiona F o doble clic para salir");
+    } else {
+      // SALIR DE FULLSCREEN
+      jframe.setAlwaysOnTop(false);
+      jframe.dispose();
+      jframe.setUndecorated(false);
+      if (normalBounds != null) {
+        jframe.setLocation(normalBounds.x, normalBounds.y);
+        jframe.setSize(normalBounds.width, normalBounds.height);
+        surface.setSize(normalBounds.width, normalBounds.height);
+      }
+      jframe.setVisible(true);
+      hideControlWindow = false;
+      cmdWindowWidth = cmdWindowWidthOriginal;
+      isFullscreen = false;
+      println("✓ Modo ventana restaurado");
+    }
+  } else {
+    println("✗ Error: No se pudo obtener referencia a JFrame");
+  }
+}
+
+// ============================================
+// LOGO GALLERY UI
+// ============================================
+
+// Dibujar botón para cargar logos
+// Callback cuando se selecciona imagen para un slot específico
+void logoSlotSelected(File selection) {
+  if (selection == null) {
+    println("Selección cancelada");
+    logoSlotToLoad = -1;
+    return;
+  }
+  
+  try {
+    String sourcePath = selection.getAbsolutePath();
+    String fileName = selection.getName();
+    String ext = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase();
+    
+    // Verificar que sea una imagen válida
+    if (!ext.equals("png") && !ext.equals("jpg") && !ext.equals("jpeg") && !ext.equals("gif")) {
+      println("✗ Formato no válido. Usa PNG, JPG o GIF");
+      logoSlotToLoad = -1;
+      return;
+    }
+    
+    // Cargar la imagen
+    PImage loadedImg = loadImage(sourcePath);
+    if (loadedImg == null) {
+      println("✗ Error cargando imagen");
+      logoSlotToLoad = -1;
+      return;
+    }
+    
+    // Asegurar que el array tenga al menos 4 slots
+    int minSlots = 4;
+    int requiredSize = max(minSlots, logoSlotToLoad + 1);
+    
+    if (logoGallery == null || logoGallery.length < requiredSize) {
+      int oldSize = (logoGallery == null) ? 0 : logoGallery.length;
+      PImage[] newGallery = new PImage[requiredSize];
+      String[] newNames = new String[requiredSize];
+      
+      // Copiar datos existentes
+      for (int i = 0; i < oldSize; i++) {
+        newGallery[i] = logoGallery[i];
+        newNames[i] = logoNames[i];
+      }
+      
+      // Inicializar slots vacíos con null
+      for (int i = oldSize; i < requiredSize; i++) {
+        newGallery[i] = null;
+        newNames[i] = "Empty Slot " + (i + 1);
+      }
+      
+      logoGallery = newGallery;
+      logoNames = newNames;
+      
+      println("✓ Array expandido de " + oldSize + " a " + requiredSize + " slots");
+    }
+    
+    // Guardar imagen en el slot
+    logoGallery[logoSlotToLoad] = loadedImg;
+    logoNames[logoSlotToLoad] = fileName;
+    
+    // Actualizar total: contar cuántos logos hay realmente cargados
+    int count = 0;
+    for (int i = 0; i < logoGallery.length; i++) {
+      if (logoGallery[i] != null) {
+        count = i + 1;  // El total es hasta el último slot no-nulo
+      }
+    }
+    totalLogos = count;
+    
+    println("========================================");
+    println("✓ Logo cargado en slot " + (logoSlotToLoad + 1));
+    println("  Archivo: " + fileName);
+    println("  Resolución: " + loadedImg.width + "x" + loadedImg.height);
+    println("  Total de logos activos: " + totalLogos);
+    println("========================================");
+    
+    logoSlotToLoad = -1;
+    
+  } catch (Exception e) {
+    println("✗ Error cargando imagen: " + e.getMessage());
+    e.printStackTrace();
+    logoSlotToLoad = -1;
+  }
+}
+
+// ============================================
+// MEDIAPIPE UDP RECEIVER
+// ============================================
+
+void receiveUDP() {
+  byte[] buffer = new byte[1024];
+  DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+  
+  println("✓ UDP Receiver iniciado en puerto 12346");
+  
+  while (true) {
+    try {
+      udpSocket.receive(packet);
+      String message = new String(packet.getData(), 0, packet.getLength());
+      parseMediaPipeData(message);
+      
+      udpPacketsReceived++;
+      if (udpPacketsReceived % 30 == 1) {  // Log cada ~1 segundo
+        println("✓ Paquetes UDP recibidos: " + udpPacketsReceived);
+      }
+    } catch (Exception e) {
+      if (!udpSocket.isClosed()) {
+        println("✗ Error recibiendo UDP: " + e.getMessage());
+      }
+    }
+  }
+}
+
+void parseMediaPipeData(String message) {
+  try {
+    // Parsear JSON recibido de MediaPipe
+    JSONObject json = parseJSONObject(message);
+    
+    if (json == null) {
+      if (udpPacketsReceived % 100 == 1) {
+        println("✗ JSON nulo recibido. Mensaje: " + message.substring(0, min(50, message.length())));
+      }
+      return;
+    }
+    
+    // Extraer coordenadas de los puntos
+    JSONObject nose = json.getJSONObject("nose");
+    JSONObject leftWrist = json.getJSONObject("left_wrist");
+    JSONObject rightWrist = json.getJSONObject("right_wrist");
+    JSONObject leftShoulder = json.getJSONObject("left_shoulder");
+    JSONObject rightShoulder = json.getJSONObject("right_shoulder");
+    
+    // Actualizar variables globales
+    mpNoseX = nose.getInt("x");
+    mpNoseY = nose.getInt("y");
+    mpLeftWristX = leftWrist.getInt("x");
+    mpLeftWristY = leftWrist.getInt("y");
+    mpRightWristX = rightWrist.getInt("x");
+    mpRightWristY = rightWrist.getInt("y");
+    mpLeftShoulderX = leftShoulder.getInt("x");
+    mpLeftShoulderY = leftShoulder.getInt("y");
+    mpRightShoulderX = rightShoulder.getInt("x");
+    mpRightShoulderY = rightShoulder.getInt("y");
+    
+    if (!mediaPipeDataReceived) {
+      println("========================================");
+      println("✓✓✓ PRIMER DATO MEDIAPIPE RECIBIDO! ✓✓✓");
+      println("========================================");
+      println("  Nariz: (" + mpNoseX + ", " + mpNoseY + ")");
+      println("  Muñeca izq: (" + mpLeftWristX + ", " + mpLeftWristY + ")");
+      println("  Muñeca der: (" + mpRightWristX + ", " + mpRightWristY + ")");
+      println("========================================");
+      println("⚡ ACTIVA PRESET 15 o 32 AHORA");
+      println("========================================");
+    }
+    mediaPipeDataReceived = true;
+  } catch (Exception e) {
+    if (udpPacketsReceived % 100 == 1) {  // Solo mostrar error ocasionalmente
+      println("✗ Error parseando datos MediaPipe: " + e.getMessage());
+      e.printStackTrace();
+    }
+  }
+}
+
+// Cerrar recursos al salir
+void exit() {
+  try {
+    if (udpSocket != null && !udpSocket.isClosed()) {
+      udpSocket.close();
+      println("Socket UDP cerrado");
+    }
+    if (udpThread != null) {
+      udpThread.interrupt();
+    }
+  } catch (Exception e) {
+    println("Error cerrando recursos: " + e.getMessage());
+  }
+  super.exit();
+}
