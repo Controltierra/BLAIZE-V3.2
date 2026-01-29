@@ -5,6 +5,8 @@ MOD BLAIZE PROCESSING
 
 BLAIZE-V3.2 is a modular processing framework designed for flexible data processing operations. The system provides a plugin-based architecture that allows you to register and execute multiple processing modules in sequence.
 
+**Note**: This is a framework skeleton. The current implementation provides the module management infrastructure and processing pipeline. Module-specific processing logic can be extended by subclassing `BlaizeMod` and overriding the `_process_module` method to implement custom processing operations.
+
 ## Features
 
 - **Modular Architecture**: Register and manage multiple processing modules
@@ -34,16 +36,16 @@ python3 blaize_mod.py
 ### Using Custom Configuration
 
 1. Create or modify `config.json` with your module settings
-2. Load and process with custom configuration:
+2. The configuration file will automatically register modules when loaded:
 
 ```python
 from blaize_mod import BlaizeMod
 
-# Initialize with config file
+# Initialize and load config (modules are auto-registered)
 processor = BlaizeMod()
 processor.load_config('config.json')
 
-# Process your data
+# Process your data - modules from config are ready
 results = processor.process(your_data)
 ```
 
@@ -97,12 +99,12 @@ processor.register_module("CustomModule", {"param": "value"})
 
 #### Methods
 
-- `__init__(config=None)`: Initialize processor
-- `load_config(config_file)`: Load configuration from file
-- `register_module(name, config)`: Register a processing module
-- `process(data)`: Process data through all modules
+- `__init__(config=None)`: Initialize processor with optional config dictionary
+- `load_config(config_file)`: Load configuration from file and auto-register modules
+- `register_module(name, config)`: Manually register a processing module
+- `process(data)`: Process data through all enabled modules
 - `get_status()`: Get current system status
-- `export_log(filename)`: Export processing log
+- `export_log(filename)`: Export processing log to file
 
 ## Processing Flow
 

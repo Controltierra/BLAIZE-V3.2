@@ -31,9 +31,10 @@ def example_with_config():
     print("=" * 60)
     
     processor = BlaizeMod()
+    # load_config automatically registers modules defined in config.json
     processor.load_config("config.json")
     
-    # Process multiple items
+    # Process multiple items using modules from config
     items = [
         {"id": 1, "data": "First item"},
         {"id": 2, "data": "Second item"},
@@ -44,6 +45,7 @@ def example_with_config():
         print(f"\nProcessing item {item['id']}...")
         results = processor.process(item)
         print(f"Status: {results['status']}")
+        print(f"Modules used: {len(results['module_results'])}")
 
 
 def example_custom_modules():
@@ -98,9 +100,9 @@ def example_log_export():
     processor.process({"test": "data2"})
     processor.process({"test": "data3"})
     
-    # Export log
+    # Export log (note: this file is in .gitignore as it's generated output)
     processor.export_log("processing_log.json")
-    print("Log exported to processing_log.json")
+    print("Log exported to processing_log.json (gitignored output file)")
 
 
 if __name__ == "__main__":

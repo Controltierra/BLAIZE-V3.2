@@ -26,18 +26,50 @@ class BlaizeMod:
         self.version = "3.2"
         self.modules = []
         self.processing_log = []
+        self.enable_console_logging = True
+        self.max_log_entries = 1000
         
     def load_config(self, config_file: str):
         """
-        Load configuration from a JSON file.
+        Load configuration from a JSON file and register modules.
         
         Args:
             config_file: Path to configuration file
         """
         try:
             with open(config_file, 'r') as f:
-                self.config = json.load(f)
+                config_data = json.load(f)
+            
+            # Extract BLAIZE MOD configuration
+            if 'blaize_mod' in config_data:
+                blaize_config = config_data['blaize_mod']
+                self.config = blaize_config
+                
+                # Apply settings
+                if 'settings' in blaize_config:
+                    settings = blaize_config['settings']
+                    self.enable_console_logging = settings.get('enable_logging', True)
+                    self.max_log_entries = settings.get('max_log_entries', 1000)
+                
+                # Register modules from config
+                if 'modules' in blaize_config:
+                    for module_def in blaize_config['modules']:
+                        if module_def.get('enabled', True):
+                            self.register_module(
+                                module_def['name'],
+                                module_def.get('config', {})
+                            )
+            else:
+                self.config = config_data
+                
             self.log(f"Configuration loaded from {config_file}")
+            
+        except FileNotFoundError:
+            self.log(f"Configuration file not found: {config_file}", level="ERROR")
+        except json.JSONDecodeError as e:
+            self.log(f"Invalid JSON in configuration file: {e}", level="ERROR")
+        except PermissionError:
+            self.log(f"Permission denied reading configuration file: {config_file}", level="ERROR")
         except Exception as e:
             self.log(f"Error loading configuration: {e}", level="ERROR")
             
@@ -125,7 +157,14 @@ class BlaizeMod:
             "message": message
         }
         self.processing_log.append(log_entry)
-        print(f"[{level}] {message}")
+        
+        # Enforce max log entries limit
+        if len(self.processing_log) > self.max_log_entries:
+            self.processing_log.pop(0)
+        
+        # Print to console if enabled
+        if self.enable_console_logging:
+            print(f"[{level}] {message}")
         
     def get_status(self) -> Dict[str, Any]:
         """
@@ -152,7 +191,13 @@ class BlaizeMod:
         try:
             with open(filename, 'w') as f:
                 json.dump(self.processing_log, f, indent=2)
-            self.log(f"Log exported to {filename}")
+            # Log after export to avoid recursive logging in the exported file
+            if self.enable_console_logging:
+                print(f"[INFO] Log exported to {filename}")
+        except FileNotFoundError:
+            self.log(f"Directory not found for log export: {filename}", level="ERROR")
+        except PermissionError:
+            self.log(f"Permission denied writing log file: {filename}", level="ERROR")
         except Exception as e:
             self.log(f"Error exporting log: {e}", level="ERROR")
 
