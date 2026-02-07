@@ -5,6 +5,26 @@
 
 ---
 
+## 📜 Basado en Blaize V3 Original
+
+Este proyecto es una **versión modificada** de [Blaize V3](https://github.com/bodgedbutworks/Blaize_V3) creado por [bodgedbutworks](https://github.com/bodgedbutworks).
+
+### 🎯 Proyecto Original
+- **Repositorio:** [bodgedbutworks/Blaize_V3](https://github.com/bodgedbutworks/Blaize_V3)
+- **Autor:** bodgedbutworks
+- **Descripción:** Software to turn your projector into a safe disco laser
+- **Licencia:** GNU General Public License v3.0
+
+### ✨ Modificaciones en esta Versión (V3.2)
+- ✅ Integración con **MediaPipe** para tracking de pose corporal
+- ✅ Interfaz gráfica (GUI) en Python para control del tracker
+- ✅ Sistema de tracking por UDP en tiempo real
+- ✅ Selección de puntos de seguimiento (nariz, manos, hombros)
+- ✅ Scripts `.bat` para ejecución simplificada en Windows
+- ✅ Versión ejecutable standalone
+
+---
+
 ## 🚀 Inicio Rápido
 
 ### Primera vez (instalar dependencias):
@@ -87,37 +107,24 @@ pip install opencv-python mediapipe numpy pillow
 ### Cámara no aparece
 → Verifica que funcione en otras apps  
 → Reinicia el tracker  
-→ Prueba diferentes resoluciones
-
-### Lag o lentitud
-→ Reduce resolución a 640x480  
-→ Cambia visualización a "Nada" o "Solo Punto"
 
 ---
 
-## 📊 Configuración Recomendada
+## 📄 Licencia
 
-| Resolución | Rendimiento | Precisión |
-|------------|-------------|-----------|
-| 640x480    | ⚡⚡⚡⚡ | ⭐⭐⭐⭐ |
-| 1280x720   | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ |
+Este proyecto mantiene la licencia **GNU General Public License v3.0** del proyecto original.
 
-💡 **Tip**: Mejor iluminación = mejor tracking
-
----
-
-## 📦 Distribución
-
-Este paquete contiene:
-- **Blaize V3**: Versión modificada con soporte MediaPipe
-- **MediaPipe Tracker**: Sistema de seguimiento corporal
-- **Todo incluido**: No necesitas instalar Processing
-
-**Tamaño total**: ~110 MB
+- Este es software libre bajo GPL v3
+- Puedes redistribuir y/o modificarlo bajo los términos de la GPL v3
+- Ver el archivo LICENSE para más detalles
+- Proyecto original: [bodgedbutworks/Blaize_V3](https://github.com/bodgedbutworks/Blaize_V3)
 
 ---
 
-**Desarrollado para Blaize V3**  
-MediaPipe Plugin - Versión Standalone  
-Febrero 2026
+## 🙏 Agradecimientos
 
+Agradecimiento especial a [bodgedbutworks](https://github.com/bodgedbutworks) por crear el proyecto original Blaize V3.
+
+**Enlaces al proyecto original:**
+- 📺 [Demo Video](https://www.youtube.com/watch?v=ziG_0-8F9Vg)
+- 📚 [Tutorial Video](https://www.youtube.com/watch?v=TjnYWlusAS8)
